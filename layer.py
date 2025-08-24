@@ -18,7 +18,18 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
     def __init__(self, in_dim, out_dim, dropout, residual, ffn, batch_norm=True, act='relu',
                  equivstable_pe=False, **kwargs):
         super().__init__(**kwargs)
-        self.activation = register.act_dict[act]
+        if act == 'relu':
+            self.activation = nn.ReLU()
+        elif act == 'elu':
+            self.activation = nn.ELU()
+        elif act == 'tanh':
+            self.activation = nn.Tanh()
+        elif act == 'leakyrelu':
+            self.activation = nn.LeakyReLU()
+        elif act == 'prelu':
+            self.activation = nn.PReLU()
+        else:
+            raise ValueError(f'Invalid activation: {act}')#定义线性层
         self.A = pyg_nn.Linear(in_dim, out_dim, bias=True)
         self.B = pyg_nn.Linear(in_dim, out_dim, bias=True)
         self.C = pyg_nn.Linear(in_dim, out_dim, bias=True)
@@ -34,9 +45,9 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
                 self.activation(),
                 nn.Linear(out_dim, 1),
                 nn.Sigmoid())
-
-        self.act_fn_x = self.activation()
-        self.act_fn_e = self.activation()
+        #这里就是GNN+技术
+        self.act_fn_x = self.activation
+        self.act_fn_e = self.activation
         self.dropout = dropout
         self.residual = residual
         self.e = None
@@ -54,7 +65,8 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
                 self.norm1_local = nn.BatchNorm1d(out_dim)
             self.ff_linear1 = nn.Linear(out_dim, out_dim*2)
             self.ff_linear2 = nn.Linear(out_dim*2, out_dim)
-            self.act_fn_ff = register.act_dict[cfg.gnn.act]()
+            # 修复激活函数的使用方式，使用传入的act参数而不是cfg.gnn.act
+            self.act_fn_ff = self.activation
             if self.batch_norm:
                 self.norm2 = nn.BatchNorm1d(out_dim)
             self.ff_dropout1 = nn.Dropout(dropout)
@@ -88,29 +100,30 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
 
         # Handling for Equivariant and Stable PE using LapPE
         # ICLR 2022 https://openreview.net/pdf?id=e95i1IHcWj
-        pe_LapPE = batch.pe_EquivStableLapPE if self.EquivStablePE else None
+        pe_LapPE = batch.pe_EquivStableLapPE if self.EquivStablePE else None #是否使用PE
 
-        x, e = self.propagate(edge_index,
+        x, e = self.propagate(edge_index,                    #主要消息传递部分，即MPNN
                               Bx=Bx, Dx=Dx, Ex=Ex, Ce=Ce,
                               e=e, Ax=Ax,
                               PE=pe_LapPE)
+        #bn
         if self.batch_norm:
             x = self.bn_node_x(x)
             e = self.bn_edge_e(e)
-
+        #激活
         x = self.act_fn_x(x)
         e = self.act_fn_e(e)
-
+        #正则
         x = F.dropout(x, self.dropout, training=self.training)
         e = F.dropout(e, self.dropout, training=self.training)
-
+        #残差连接
         if self.residual:
             x = x_in + x
             e = e_in + e
 
         batch.x = x
         batch.edge_attr = e
-        
+        #ffn 这些流程就是GNN+技术，对应aspdac
         if self.ffn:
             if self.batch_norm:
                 batch.x = self.norm1_local(batch.x)
@@ -122,7 +135,7 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
 
         return batch
 
-    def message(self, Dx_i, Ex_j, PE_i, PE_j, Ce):
+    def message(self, Dx_i, Ex_j, PE_i, PE_j, Ce): #计算边特征与权重
         """
         {}x_i           : [n_edges, out_dim]
         {}x_j           : [n_edges, out_dim]
@@ -142,7 +155,7 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
         self.e = e_ij
         return sigma_ij
 
-    def aggregate(self, sigma_ij, index, Bx_j, Bx):
+    def aggregate(self, sigma_ij, index, Bx_j, Bx): #聚合特征表示，根据权重
         """
         sigma_ij        : [n_edges, out_dim]  ; is the output from message() function
         index           : [n_edges]
@@ -151,6 +164,7 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
         dim_size = Bx.shape[0]  # or None ??   <--- Double check this
 
         sum_sigma_x = sigma_ij * Bx_j
+        #聚合
         numerator_eta_xj = scatter(sum_sigma_x, index, 0, None, dim_size,
                                    reduce='sum')
 
@@ -161,7 +175,7 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
         out = numerator_eta_xj / (denominator_eta_xj + 1e-6)
         return out
 
-    def update(self, aggr_out, Ax):
+    def update(self, aggr_out, Ax): #更新节点表示
         """
         aggr_out        : [n_nodes, out_dim] ; is the output from aggregate() function after the aggregation
         {}x             : [n_nodes, out_dim]
@@ -189,7 +203,7 @@ class GatedGCNLayer(pyg_nn.conv.MessagePassing):
 #     def forward(self, batch):
 #         return self.model(batch)
     
-    
+#剩下两个模型大体都一样，只不过基本的MPNN类别不同
 class GCNConvLayer(nn.Module):
     
     def __init__(self, dim_in, dim_out, dropout, residual, ffn, batch_norm):
