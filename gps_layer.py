@@ -12,7 +12,7 @@ from torch_geometric.utils import to_dense_batch
 from layer import GatedGCNLayer, GCNConvLayer, GINEConvLayer
 # from graphgps.layer.gine_conv_layer import GINEConvESLapPE
 
-
+#这里是定义GPS层的，如果选择gps_attention,就会使用自定义的MPNN和全局注意力模型，否则就会使用基础的MPNN和全局注意力模型
 class GPSLayer(nn.Module):
     """Local MPNN + full graph attention x-former layer.
     """
@@ -24,19 +24,34 @@ class GPSLayer(nn.Module):
                  log_attn_weights=False, g_drop=0.0, g_ffn=True,
                  res_linear=False, residual=False, task_level=None):
         super().__init__()
+
         self.hid_dim = hid_dim
         self.num_heads = num_heads
         self.attn_dropout = attn_dropout
         self.layer_norm = layer_norm
         self.batch_norm = batch_norm
         self.equivstable_pe = equivstable_pe
-        self.activation = register.act_dict[act]
+        # self.activation = register.act_dict[act]
         self.residual = residual
         self.log_attn_weights = log_attn_weights
         self.g_bn = g_bn
         self.g_drop = g_drop
         self.g_ffn = g_ffn
         self.task_level = task_level
+        
+        # 修改激活函数处理方式，与model.py保持一致
+        if act == 'relu':
+            self.activation = nn.ReLU()
+        elif act == 'elu':
+            self.activation = nn.ELU()
+        elif act == 'tanh':
+            self.activation = nn.Tanh()
+        elif act == 'leakyrelu':
+            self.activation = nn.LeakyReLU()
+        elif act == 'prelu':
+            self.activation = nn.PReLU()
+        else:
+            raise ValueError(f'Invalid activation: {act}')
         if log_attn_weights and global_model_type not in ['Transformer',
                                                           'BiasedTransformer']:
             raise NotImplementedError(
@@ -44,15 +59,18 @@ class GPSLayer(nn.Module):
                 f"for '{global_model_type}' global attention model."
             )
         # added by shan
+        #定义残差连接
         self.res_linear = res_linear
         self.residual_linear = nn.Linear(hid_dim, hid_dim)
 
         # Local message-passing model.
+        #定义GPS自己的MPNN模型
         self.local_gnn_with_edge_attr = True
         if local_gnn_type == 'None':
             self.local_model = None
 
         # MPNNs without edge attributes support.
+        #和model里的MPNN差不多，其实就是如果用gps，就会Transformer+MPNN,如果没用，那就是MPNN，所以两者本来区别不大，不过gps还有自定义的MPNN
         elif local_gnn_type == 'GCN':
             self.local_gnn_with_edge_attr = False
             self.local_model = pygnn.GCNConv(hid_dim, hid_dim)
@@ -95,6 +113,7 @@ class GPSLayer(nn.Module):
                                              pre_layers=1,
                                              post_layers=1,
                                              divide_input=False)
+        #自定义MPNN，即GNN+
         elif local_gnn_type == 'CustomGatedGCN':
             self.local_model = GatedGCNLayer(hid_dim, hid_dim,
                                              dropout=g_drop,
@@ -121,9 +140,10 @@ class GPSLayer(nn.Module):
         self.local_gnn_type = local_gnn_type
 
         # Global attention transformer-style model.
+        #是否启用注意力机制，详见aspdac，transformer与MPNN两者的输出是拼接后过MLP的，即model里的head_layer,而不是串联
         if global_model_type == 'None':
             self.self_attn = None
-        elif global_model_type in ['Transformer', 'BiasedTransformer']:
+        elif global_model_type in ['Transformer', 'BiasedTransformer']: #定义上游图注意力层以更新节点表示
             self.self_attn = torch.nn.MultiheadAttention(
                 hid_dim, num_heads, dropout=self.attn_dropout, batch_first=True)
             # self.global_model = torch.nn.TransformerEncoderLayer(
@@ -143,7 +163,8 @@ class GPSLayer(nn.Module):
             raise ValueError(f"Unsupported global x-former model: "
                              f"{global_model_type}")
         self.global_model_type = global_model_type
-
+        
+        #定义层归一化与批次归一化
         if self.layer_norm and self.batch_norm:
             raise ValueError("Cannot apply two types of normalization together")
 
@@ -162,9 +183,11 @@ class GPSLayer(nn.Module):
         self.dropout_attn = nn.Dropout(dropout)
 
         # Feed Forward block.
+        #定义前馈网络
         self.ff_linear1 = nn.Linear(hid_dim, hid_dim * 2)
         self.ff_linear2 = nn.Linear(hid_dim * 2, hid_dim)
-        self.act_fn_ff = self.activation()
+        # 修复激活函数的使用方式，移除括号
+        self.act_fn_ff = self.activation  # 移除括号，不要调用函数
         if self.layer_norm:
             self.norm2 = pygnn.norm.LayerNorm(hid_dim)
             # self.norm2 = pygnn.norm.GraphNorm(hid_dim)
@@ -189,7 +212,7 @@ class GPSLayer(nn.Module):
         # Local MPNN with edge attributes.
         if self.local_model is not None:
             self.local_model: pygnn.conv.MessagePassing  # Typing hint.
-            if self.local_gnn_type == 'CustomGatedGCN' or self.local_gnn_type == 'CustomGINEConv':
+            if self.local_gnn_type == 'CustomGatedGCN' or self.local_gnn_type == 'CustomGINEConv': #选择MPNN模型并嵌入边特征与PE，但实际上不用pe
                 es_data = None
                 if self.equivstable_pe:
                     es_data = batch.pe_EquivStableLapPE
@@ -199,13 +222,15 @@ class GPSLayer(nn.Module):
                                                 edge_attr=batch.edge_attr,
                                                 pe_EquivStableLapPE=es_data))
                 # GatedGCN does residual connection and dropout internally.
+                #更新特征表示
                 h_local = local_out.x
                 batch.edge_attr = local_out.edge_attr 
             elif self.local_gnn_type == 'CustomGCNConv' :
                 local_out = self.local_model(Batch(batch=batch,
                                                 x=h,
                                                 edge_index=batch.edge_index))
-                h_local = local_out.x          
+                h_local = local_out.x   
+            #自定义函数以外的MPNN       
             else:
                 if self.local_gnn_with_edge_attr:
                     if self.equivstable_pe:
@@ -221,7 +246,7 @@ class GPSLayer(nn.Module):
                     h_local = self.local_model(h, batch.edge_index)
                 h_local = self.dropout_local(h_local)
                 h_local = h_in1 + h_local  # Residual connection.
-
+            #进行ln或bn
             if self.layer_norm:
                 h_local = self.norm1_local(h_local, batch.batch)
             if self.batch_norm:
@@ -229,6 +254,7 @@ class GPSLayer(nn.Module):
             h_out_list.append(h_local)
 
         # Multi-head attention.
+        #多头注意力机制
         if self.self_attn is not None:
             # 保存原始顺序用于后续恢复
             # print(f"batch.batch:{batch.batch}")
@@ -262,12 +288,12 @@ class GPSLayer(nn.Module):
                 0.0000], device='cuda:0')
                 batch.y[:, 1] (second column): tensor([0., 0., 0., 0., 0., 0., 0., 0., 3., 0.], device='cuda:0')
                 """
-                
+                # 排序节点顺序以便恢复原始顺序
                 sorted_idx = torch.arange(batch.num_nodes, device=h.device).sort()[1]
                 h_sorted = h[sorted_idx]
                 batch_sorted = torch.arange(batch.num_nodes, device=sorted_idx.device)[sorted_idx]
             elif self.task_level == 'edge':
-
+                # 排序边顺序以便恢复原始顺序
                 sorted_idx = batch.batch.sort()[1]
                 h_sorted = h[sorted_idx]
                 batch_sorted = batch.batch[sorted_idx]
@@ -292,18 +318,18 @@ class GPSLayer(nn.Module):
             h_attn = torch.zeros_like(h_in1)  # 原始大小
             h_attn[sorted_idx] = h_attn_sorted  # 将排序后的结果放回原始位置
             
-            # 残差连接
+            # 残差连接 
             h_attn = h_in1 + h_attn
             
             if self.layer_norm:
                 h_attn = self.norm1_attn(h_attn, batch.batch)
             if self.batch_norm:
                 h_attn = self.norm1_attn(h_attn)
-            h_out_list.append(h_attn)
+            h_out_list.append(h_attn)  #嵌入注意力输出
 
         # 合并局部和全局输出
         h = sum(h_out_list)
-
+        
         # Feed Forward block.
         h = h + self._ff_block(h)
         if self.layer_norm:
@@ -312,8 +338,9 @@ class GPSLayer(nn.Module):
             h = self.norm2(h)
 
         batch.x = h
-        return batch
-
+        return batch #输出节点表示给后续MLP层
+    
+    #计算注意力权重，更新节点表示
     def _sa_block(self, x, attn_mask, key_padding_mask):
         """Self-attention block.
         """
@@ -332,7 +359,7 @@ class GPSLayer(nn.Module):
                                   average_attn_weights=False)
             self.attn_weights = A.detach().cpu()
         return x
-
+    #正则化
     def _ff_block(self, x):
         """Feed Forward block.
         """
