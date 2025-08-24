@@ -6,6 +6,9 @@ from sklearn.metrics import (
     mean_absolute_error, mean_squared_error,
     root_mean_squared_error, r2_score,
 )
+from gate_position_evaluator import evaluate_predictions
+from gate_power_density_evaluator import evaluate_predictions_res
+from via_count_evaluator import evaluate_predictions_via
 import numpy as np
 import time
 from tqdm import tqdm
@@ -25,16 +28,16 @@ from torch.optim.lr_scheduler import StepLR
 NET = 0
 DEV = 1
 PIN = 2
+#logfer类记录训练过程的结果
 
-class Logger (object):
+class Logger(object):
     """ 
     Logger for printing message during training and evaluation. 
     Adapted from GraphGPS 
     """
     
-    def __init__(self, task='classification', max_label=None):
+    def __init__(self, task='classification', max_label=None, dataset_name=None):
         super().__init__()
-        # Whether to run comparison tests of alternative score implementations.
         self.test_scores = False
         self._iter = 0
         self._true = []
@@ -43,65 +46,50 @@ class Logger (object):
         self._size_current = 0
         self.task = task
         self.max_label = max_label
+        self.dataset_name = dataset_name  # Store args object
+        
     def update_stats(self, true, pred, batch_size, loss):
-        self._true.append(true)
-        self._pred.append(pred)
+        self._true.append(true)        
+        self._pred.append(pred)        
         self._size_current += batch_size
-        self._loss += loss * batch_size
-        self._iter += 1
+        self._loss += loss * batch_size  
+        self._iter += 1                  
 
     def write_epoch(self, split=""):
         true, pred_score = torch.cat(self._true), torch.cat(self._pred)
-        true = true.numpy()
-        pred_score = pred_score.numpy()
-        reformat = lambda x: round(float(x), 4)        
+        true = torch.tensor(true)
+        pred_score = torch.tensor(pred_score)
+        
+        # 计算平均loss
+        avg_loss = self._loss / self._size_current
+        
+        metrics = {}
+        # Use args.dataset to decide which evaluation function to use
+        if self.dataset_name == 'integrated_position_prediction_graph':
+            # Use classification evaluation
+            metrics = evaluate_predictions(pred_score, true)
+        elif self.dataset_name == 'integrated_power_density_prediction_graph':
+            # Use regression evaluation
+            metrics = evaluate_predictions_res(pred_score, true)
+        elif self.dataset_name == 'integrated_route_with_global_features':
+            metrics = evaluate_predictions_via(pred_score, true)
+        
+        # 将loss添加到metrics中
+        metrics['loss'] = avg_loss
+            
+        # 注释掉单个batch损失的输出
+        output = f"{split.capitalize()} Metrics: "
+        output += ", ".join([f"{key}: {value:.4f}" for key, value in metrics.items()])
+        print(output)  # 现在包含loss指标
+        return metrics
 
-        if self.task == 'classification':
-
-            max_label_indices = np.where(true == self.max_label)[0]
-            mask = np.zeros_like(true, dtype=bool)
-            if len(max_label_indices) > 0:
-                selected_max_indices = np.random.choice(
-                    max_label_indices, 
-                    size=max(1, len(max_label_indices) // 10),  # 至少保留1个样本
-                    replace=False
-                )
-                mask[selected_max_indices] = True
-                    
-            mask[true != self.max_label] = True
-
-            accuracy = accuracy_score(true[mask], pred_score[mask])
-            f1 = f1_score(true[mask], pred_score[mask], average='macro')
-            precision = precision_score(true[mask], pred_score[mask], average='macro')
-            recall = recall_score(true[mask], pred_score[mask], average='macro')
-
-            res = {
-                'loss': reformat(self._loss / self._size_current),
-                'accuracy': reformat(accuracy),
-                'f1': reformat(f1),
-                'precision': reformat(precision),
-                'recall': reformat(recall),
-            }
-
-        else:  # regression task
-            res = {
-                'loss': round(self._loss / self._size_current, 8),
-                'mae': reformat(mean_absolute_error(true, pred_score)),
-                'mse': reformat(mean_squared_error(true, pred_score)),
-                'rmse': reformat(root_mean_squared_error(true, pred_score)),
-                'r2': reformat(r2_score(true, pred_score)),
-            }
-
-        # Just print the results to screen
-        print(split, res)
-        return res
-
+#损失函数
 def compute_loss(args, pred, true, criterion):
     """Compute loss and prediction score. 
     Args:
         args (argparse.Namespace): The arguments
         pred (torch.tensor): Unnormalized prediction
-        true (torch.tensor): Groud truth label
+        true (torch.tensor): Ground truth label
         criterion (torch.nn.Module): The loss function
     Returns: Loss, normalized prediction score
     """
@@ -110,39 +98,48 @@ def compute_loss(args, pred, true, criterion):
         "Prediction and true label size mismatch!"
 
     if args.task == 'classification':
-        # if args.class_loss == 'focal':
-        #     class_weights = compute_class_weights(true, args.num_classes) 
-        #     focal_loss = FocalLoss(gamma=2.0, class_weights=class_weights)
-        #     loss = focal_loss(pred, true)
-        # else:
         loss = F.cross_entropy(pred, true)
         predict_class = torch.argmax(pred, dim=1)
         return loss, predict_class, true
-      
+
     elif args.task == 'regression':
-        ## Size of `pred` must be [N, 1] for regression task
-        assert pred.ndim == 1 or pred.size(1) == 1
-        pred = pred.view(-1, 1)
-
-        assert (true.size(1) == 2), \
-            "true label has two columns [continuous label, discrete label or label weights]!"
+        # 确保pred是[N, 1]形状
+        if pred.ndim == 1:
+            pred = pred.view(-1, 1)
+        elif pred.size(1) != 1:
+            pred = pred.view(-1, 1)
         
+        # 修复维度检查问题
+        if true.ndim == 1:
+            # 如果true是1D张量，将其转换为2D [N, 1]
+            true = true.view(-1, 1)
+            # 创建占位符的第二列（全零）
+            placeholder = torch.zeros_like(true)
+            true_with_placeholder = torch.cat([true, placeholder], dim=1)
+        elif true.size(1) == 1:
+            # 如果true是[N, 1]，添加第二列占位符
+            placeholder = torch.zeros_like(true)
+            true_with_placeholder = torch.cat([true, placeholder], dim=1)
+        else:
+            # 如果true已有两列，直接使用
+            assert true.size(1) == 2, \
+                "true label should have two columns [continuous label, discrete label or label weights]!"
+            true_with_placeholder = true
+       
         ## for LDS loss, the second column of `true` is the weights
-        if args.regress_loss == 'lds':
-            loss = criterion(
-                pred, 
-                true[:, 0].squeeze(), 
-                true[:, 1].squeeze() # the weight for each label
-            )
-            return loss, pred, true[:, 0].view(pred.size())
+        # if args.regress_loss == 'lds':
+        #     loss = criterion(
+        #         pred, 
+        #         true_with_placeholder[:, 0].squeeze(), 
+        #         true_with_placeholder[:, 1].squeeze()  # the weight for each label
+        #     )
+            return loss, pred, true_with_placeholder[:, 0].view(pred.size())
 
-        ## for other loss func, the second column of true is the discrete label,
-        ## which is not in use.
-        ## Size of `true[:, 0]` is [N,] for regression task, 
-        ## ensuring same sizes of `pred` and `true`
-        true = true[:, 0] if true.ndim == 2 else true
-        true = true.view(-1, 1)
-        
+        ## for other loss func
+        true = true_with_placeholder[:, 0]  # 只使用第一列（真实值）
+        true = true.view(-1, 1)  # 确保true是[N, 1]形状
+        # print(f"pred:{pred},true:{true},criterion(pred, true):{criterion(pred, true)}")
+        # assert 0
         return criterion(pred, true), pred, true
     
     else:
@@ -161,16 +158,19 @@ def eval_epoch(args, loader, model, device,
         split (str): The split name, 'val' or 'test'
         criterion (torch.nn.Module): The loss function
     """
-    model.eval()
+    model.eval()#开启评估模型，此时不训练仅预测评估，用于测试集
     time_start = time.time()
-    logger = Logger(task=args.task)
+    logger = Logger(task=args.task,dataset_name=args.dataset) #实例化日志记录器
 
-    for i, batch in enumerate(tqdm(loader, desc="eval_"+split, leave=False)):
-        pred, class_true, label_true = model(batch.to(device))
+    for i, batch in enumerate(tqdm(loader, desc="eval_"+split, leave=False)):#遍历loader
+        pred, class_true, label_true = model(batch.to(device))#模型预测并获得预测值和真实标签
+
         if args.task == 'regression':
             loss, pred_score, true = compute_loss(args, pred, label_true, criterion=criterion)
             _true = true.detach().to('cpu', non_blocking=True)
             _pred = pred_score.detach().to('cpu', non_blocking=True)
+            # print(f"pred:{_pred},true:{_true},loss:{loss}")
+            # assert 0
             logger.update_stats(true=_true,
                                 pred=_pred,
                                 batch_size=_true.size(0),
@@ -186,7 +186,7 @@ def eval_epoch(args, loader, model, device,
                                 loss=loss.detach().cpu().item(),
                                 )
     return logger.write_epoch(split)
-
+#回归任务训练模块
 def regress_train(args, regressor, optimizer, criterion,
           train_loader, val_loader, test_loaders, max_label,
           device, scheduler=None):
@@ -202,72 +202,91 @@ def regress_train(args, regressor, optimizer, criterion,
         test_laders (list): A list of test data loaders
         device (torch.device): The device to train the model on
     """
-    optimizer.zero_grad()
+    optimizer.zero_grad() #清空梯度
     
-    best_results = {
+    best_results = { #初始化最佳结果
         'best_val_mse': 1e9, 'best_val_loss': 1e9, 
         'best_epoch': 0, 'test_results': []
     }
-    
-    for epoch in range(args.epochs):
-        logger = Logger(task=args.task, max_label=max_label)
-        regressor.train()
-
-        for i, batch in enumerate(tqdm(train_loader, desc=f'Epoch:{epoch}')):
+    for epoch in range(args.epochs):#遍历epoch
+        logger = Logger(task=args.task, max_label=max_label)#开启日志记录器
+        regressor.train()#开启训练模式
+        # print(f"你好")
+        for i, batch in enumerate(tqdm(train_loader, desc=f'Epoch:{epoch}')):#遍历loader
             optimizer.zero_grad()
 
             ## Get the prediction from the model
-            y_pred,y_class, y = regressor(batch.to(device))
+            #训练模型
+            # print(f"你好吗")
+            y_pred,true_class, y = regressor(batch.to(device))
+            y_pred = y_pred.float()
+            y = y.float()
             loss, pred, true = compute_loss(args, y_pred, y, criterion=criterion)
             _true = true.detach().to('cpu', non_blocking=True)
             _pred = y_pred.detach().to('cpu', non_blocking=True)
-
+            #后向传播并更新梯度
             loss.backward()
             optimizer.step()
             
             ## Update the logger and print message to the screen
+            #记录训练过程
             logger.update_stats(
                 true=_true, pred=_pred, 
                 batch_size=_true.squeeze().size(0), 
                 loss=loss.detach().cpu().item()
             )
+        print(f"\n===== Epoch {epoch}/{args.epochs} =====")            
+        train_res = eval_epoch(
+            args, train_loader, 
+            regressor, device, split='train', criterion=criterion
+        )    
+        
 
-        logger.write_epoch(split='train')
+        # train_metrics = logger.write_epoch(split='train')  # 打印训练集结果
+        # print(f"Training Metrics: {train_res}")
+        
         ## ========== validation ========== ##
-        val_res = eval_epoch(
+        val_res = eval_epoch( #获得验证集结果
             args, val_loader, 
             regressor, device, split='val', criterion=criterion
         )
+        
+        # print(f"Validation Metrics: {val_res}")
+        
         if scheduler is not None:
             scheduler.step()
             
         ## update the best results so far
-        if best_results['best_val_mse'] > val_res['mse']:
-            best_results['best_val_mse'] = val_res['mse']
-            best_results['best_val_loss'] = val_res['loss']
-            best_results['best_epoch'] = epoch
         
-            test_results = []
+        #只有获得更优验证集结果时才在测试集上评估并更新最佳结果
+        # if  best_results['best_val_mae'] > val_res['mae']:
+        #     best_results['best_val_mae'] = val_res['mae']
+        #     best_results['best_val_loss'] = val_res['loss']
+        #     best_results['best_epoch'] = epoch
+        
+        test_results = []
            
             ## ========== testing on other datasets ========== ##
-            for test_name in test_loaders.keys():
-                res = eval_epoch(
-                    args, test_loaders[test_name], 
-                    regressor, device, split='test', 
-                    criterion=criterion
-                )
-                test_results.append(res)
-            os.makedirs("downstream_model", exist_ok=True)
-            torch.save(regressor.state_dict(), f"downstream_model/model_{epoch}-{args.regress_loss}.pth")
+            #在测试集上测试
+        for test_name in test_loaders.keys():
+            res = eval_epoch(
+                args, test_loaders[test_name], 
+                regressor, device, split='test', 
+                criterion=criterion
+            )
+            # test_results.append(res)
+        os.makedirs("downstream_model", exist_ok=True)
+        torch.save(regressor.state_dict(), f"downstream_model/model_{epoch}-{args.regress_loss}.pth")
 
-        if best_results['best_epoch'] == epoch:
-            best_results['test_results'] = test_results
+        # if best_results['best_epoch'] == epoch:
+        #     best_results['test_results'] = test_results
 
-        print( "=====================================")
-        print(f" Best epoch: {best_results['best_epoch']}, mse: {best_results['best_val_mse']}, loss: {best_results['best_val_loss']}")
-        print(f" Test results: {[res for res in best_results['test_results']]}")
-        print( "=====================================")
+        # print( "=====================================")
+        # print(f" Best epoch: {best_results['best_epoch']}, mse: {best_results['best_val_mse']}, loss: {best_results['best_val_loss']}")
+        # print(f" Test results: {[res for res in best_results['test_results']]}")
+        # print( "=====================================")
 
+#分类任务训练模块
 def class_train(args, classifier,optimizer_classifier, 
           train_loader, val_loader, test_loaders, max_label,
           device, scheduler=None):
@@ -293,24 +312,25 @@ def class_train(args, classifier,optimizer_classifier,
     # initialize the best model metrics
 
     best_f1 = 0.0
-    
+    #大致流程与回归任务类似，不同之处在于计算损失函数
     for epoch in range(args.epochs):
         epoch_start_time = time.time()
 
         # add the logger for classification task
         logger = Logger(task='classification', max_label=max_label)
         classifier.train()
-
+        
         for i, batch in enumerate(tqdm(train_loader, desc=f'Epoch:{epoch}')):
             # Move batch to device
             batch = batch.to(device)
             optimizer_classifier.zero_grad()
-            
             ## Get the prediction from the model
             class_logits,true_class, true_label = classifier(batch)
             class_probs = F.softmax(class_logits, dim=1)
 
             predict_class = torch.argmax(class_probs, dim=1)
+            
+            # 🔍 调试打印 - 看看这里的数据状态
             
             ## set the loss function for classification task
             # if args.class_loss == 'focal':
@@ -385,7 +405,7 @@ def class_train(args, classifier,optimizer_classifier,
         print(f" Test results: {[res for res in test_class_results.values()]}")
         print( "=====================================")
 
-
+#下游训练模型，即按照任务类别调用不同的训练模块
 def downstream_train(args, dataset, device, cl_embeds=None):
     """ downstream task training for link prediction
     Args:
@@ -395,10 +415,11 @@ def downstream_train(args, dataset, device, cl_embeds=None):
         all_node_embeds (torch.tensor): The node embeddings come from the contrastive learning
         device (torch.device): The device to train the model on
     """
-    if args.sgrl:
-        dataset.set_cl_embeds(cl_embeds)
-
-    dataset.norm_nfeat([NET, DEV])
+    # 删除以下代码：
+    # if args.sgrl:
+    #     dataset.set_cl_embeds(cl_embeds)
+    
+    # dataset.norm_nfeat([NET, DEV])#归一化节点特征
     # print(f"dataset.norm_nfeat([NET, DEV]):{dataset.norm_nfeat([NET, DEV])}")
     # assert 0
 
@@ -407,7 +428,7 @@ def downstream_train(args, dataset, device, cl_embeds=None):
     # Subgraph sampling for each dataset graph & PE calculation
     (
         train_loader, val_loader, test_loaders, max_label
-    ) = dataset_sampling(args, dataset)
+    ) = dataset_sampling(args, dataset) #获得训练集、验证集、测试集loader，最大标签数
 
 
     if args.task == 'regression':
@@ -434,16 +455,16 @@ def downstream_train(args, dataset, device, cl_embeds=None):
         #     criterion = WeightedMSE()
         # else:
         #     raise ValueError(f"Loss func {args.regress_loss} not supported!")
-        criterion = torch.nn.MSELoss(reduction='mean')
+        criterion = torch.nn.MSELoss(reduction='mean') #定义回归任务的损失函数
         
         
         start = time.time()
-        model = GraphHead(args)
+        model = GraphHead(args) #加载模型
         model = model.to(device)
-        optimizer = torch.optim.Adam(model.parameters(),lr=args.lr)
+        optimizer = torch.optim.Adam(model.parameters(),lr=args.lr) #定义优化器
         
         # 1) 每过 30 个 epoch，把 lr 降为原来的一半
-        
+        #动态调整学习率
         scheduler = StepLR(optimizer, step_size=40, gamma=0.5)
         # 或者，用监控 val loss 的方式：
         # scheduler = ReduceLROnPlateau(optimizer, mode='min',
