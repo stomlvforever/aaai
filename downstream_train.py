@@ -133,12 +133,20 @@ def compute_loss(args, pred, true, criterion):
         #         true_with_placeholder[:, 0].squeeze(), 
         #         true_with_placeholder[:, 1].squeeze()  # the weight for each label
         #     )
+            
             return loss, pred, true_with_placeholder[:, 0].view(pred.size())
 
         ## for other loss func
         true = true_with_placeholder[:, 0]  # 只使用第一列（真实值）
         true = true.view(-1, 1)  # 确保true是[N, 1]形状
+        # print("++++++++++++++++++++++++++++++++++++++++++++++++")
+        # absolute_error = torch.abs(pred - true)
+        # print(f"绝对误差形状: {absolute_error.shape}")  # [N]
+        # print(f"平均绝对误差 (MAE): {torch.mean(absolute_error).item():.4f}")   
         # print(f"pred:{pred},true:{true},criterion(pred, true):{criterion(pred, true)}")
+        # print(f"pred 范围: {pred.min():.4f} ~ {pred.max():.4f}")
+        # print(f"true 范围: {true.min():.4f} ~ {true.max():.4f}") 
+        # print(f"criterion(pred, true):{criterion(pred, true)}")
         # assert 0
         return criterion(pred, true), pred, true
     
@@ -204,10 +212,6 @@ def regress_train(args, regressor, optimizer, criterion,
     """
     optimizer.zero_grad() #清空梯度
     
-    best_results = { #初始化最佳结果
-        'best_val_mse': 1e9, 'best_val_loss': 1e9, 
-        'best_epoch': 0, 'test_results': []
-    }
     for epoch in range(args.epochs):#遍历epoch
         logger = Logger(task=args.task, max_label=max_label)#开启日志记录器
         regressor.train()#开启训练模式
@@ -226,6 +230,14 @@ def regress_train(args, regressor, optimizer, criterion,
             _pred = y_pred.detach().to('cpu', non_blocking=True)
             #后向传播并更新梯度
             loss.backward()
+            
+            # # 计算并打印梯度范数（不进行裁剪）
+            # grad_norm = torch.nn.utils.clip_grad_norm_(regressor.parameters(), max_norm=float('inf'))
+            
+            # # 每10个batch打印一次
+
+            # print(f"Epoch {epoch}, Batch {i}, Gradient Norm: {grad_norm:.6f}")
+            
             optimizer.step()
             
             ## Update the logger and print message to the screen
@@ -463,9 +475,9 @@ def downstream_train(args, dataset, device, cl_embeds=None):
         model = model.to(device)
         optimizer = torch.optim.Adam(model.parameters(),lr=args.lr) #定义优化器
         
-        # 1) 每过 30 个 epoch，把 lr 降为原来的一半
+
         #动态调整学习率
-        scheduler = StepLR(optimizer, step_size=40, gamma=0.5)
+        scheduler = StepLR(optimizer, step_size=40, gamma=1)
         # 或者，用监控 val loss 的方式：
         # scheduler = ReduceLROnPlateau(optimizer, mode='min',
         #                               factor=0.5, patience=5,
