@@ -11,41 +11,13 @@ import os
 import pickle
 from collections import Counter
 from torch_geometric.data import HeteroData
+from utils import sample_nodes_by_ratio, plot_true_values_distribution_before_sampling  # 导入新模块中的函数
 # NET = 0
 # DEV = 1
 # PIN = 2
 
+# 移除原来的 sample_nodes_by_ratio 函数，因为已经移到 sampling_utils.py 中
 
-def sample_nodes_by_ratio(graph, ratio=0.2, seed=42):
-    """
-    按照比例从每个子图中采样节点
-    Args:
-        graph (torch_geometric.data.Data): 包含节点和子图ID的图数据
-        ratio (float): 采样比例，默认为 0.2（表示采样 20% 的节点）
-        seed (int): 随机种子，用于控制采样的可重复性
-    Returns:
-        sampled_node_indices (torch.Tensor): 被采样的节点索引
-    """
-    torch.manual_seed(seed)  # 设置随机种子，确保可重复性
-
-    # 存储采样的节点索引
-    sampled_node_indices = []
-
-    # 遍历每个子图的节点
-    unique_graph_ids = torch.unique(graph.graph_id)  # 获取所有子图的 ID
-    for graph_id in unique_graph_ids:
-        # 获取当前子图的所有节点索引
-        current_graph_nodes = torch.nonzero(graph.graph_id == graph_id).squeeze()
-
-        # 根据比例计算采样数量
-        num_samples = int(len(current_graph_nodes) * ratio)
-
-        # 进行随机采样
-        sampled_nodes = torch.randperm(len(current_graph_nodes))[:num_samples]
-        sampled_node_indices.append(current_graph_nodes[sampled_nodes])
-
-    # 将所有采样的节点索引拼接在一起
-    return torch.cat(sampled_node_indices)
 
 def dataset_sampling(args, dataset):
     """ 
@@ -56,14 +28,20 @@ def dataset_sampling(args, dataset):
     Return:
         train_loader, val_loader, test_loaders
     """
+    # 在采样之前绘制真实值分布图
+    plot_true_values_distribution_before_sampling(
+        dataset, 
+        dataset_name=args.dataset
+    )
     # print(f"dataset[0].x[:,6].min:{dataset[0].x[:,6].min()}")
     # print(f"dataset[0].x[:,6].max:{dataset[0].x[:,6].max()}")    
-    # print(f"dataset[0].x:{dataset[0].x}")
+    print(f"dataset[0].x:{dataset[0].x}")
+
     print(f"dataset[0]:{dataset[0]}")
     # print(f"dataset[0].y:{dataset[0].y}")
     # print(f"dataset[0].edge_index:{dataset[0].edge_index}")    
     # print(f"dataset[0].edge_attr:{dataset[0].edge_attr}")
-    # assert 0
+    assert 0
     all_graph_indices = np.arange(30)
     np.random.shuffle(all_graph_indices)
     train_graph_indices = all_graph_indices[:15]
