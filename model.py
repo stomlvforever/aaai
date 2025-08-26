@@ -207,8 +207,8 @@ class GraphHead(nn.Module):
             hidden_channels=hidden_dim, 
             out_channels=dim_out, 
             num_layers=args.num_head_layers, 
-            use_bn=use_bn, dropout=dropout, 
-            activation=args.act_fn,
+            # use_bn=None, dropout=None, 
+            # activation=args.act_fn,
         )
         
         ## Batch normalization #层归一化
@@ -283,7 +283,47 @@ class GraphHead(nn.Module):
                 # print(f"  batch.x形状: {x.shape}")
                 x = self.feature_projection(x)
         
-            # elif self.args.dataset == 'integrated_power_density_prediction_graph':
+            elif self.dataset_name == 'integrated_power_density_prediction_graph':
+                node_type_ids = batch.x[:, 2].long()  # 第3维：节点类型
+                col4_ids = batch.x[:, 3].long()       # 第4维：需要embedding的特征
+                col6_ids = batch.x[:, 5].long()       # 第6维：需要embedding的特征
+                edge_type_ids = batch.edge_attr[batch.e_id, 1].long()
+                
+                # 对各个离散特征进行重映射
+                unique_node_types, node_inverse = torch.unique(node_type_ids, return_inverse=True)
+                unique_col4_types, col4_inverse = torch.unique(col4_ids, return_inverse=True)
+                unique_col6_types, col6_inverse = torch.unique(col6_ids, return_inverse=True)
+                unique_edge_types, edge_inverse = torch.unique(edge_type_ids, return_inverse=True)
+                
+                # # 🔍 打印重映射信息
+                # print(f"🔍 重映射信息:")
+                # print(f"  unique_node_types数量: {len(unique_node_types)}, 最大重映射ID: {node_inverse.max()}")
+                # print(f"  unique_col4_types数量: {len(unique_col4_types)}, 最大重映射ID: {col4_inverse.max()}")
+                # print(f"  unique_col6_types数量: {len(unique_col6_types)}, 最大重映射ID: {col6_inverse.max()}")
+                # print(f"  unique_edge_types数量: {len(unique_edge_types)}, 最大重映射ID: {edge_inverse.max()}")
+                
+                # 创建重映射的ID
+                remapped_node_type_ids = node_inverse.to(batch.x.device)
+                remapped_col4_ids = col4_inverse.to(batch.x.device)
+                remapped_col6_ids = col6_inverse.to(batch.x.device)
+                remapped_edge_type_ids = edge_inverse.to(batch.x.device)
+                
+                # 通过embedding层编码离散特征
+                x_node = self.node_encoder(remapped_node_type_ids)  # embedding维度
+                x_col4 = self.col4_encoder(remapped_col4_ids)       # embedding维度
+                x_col6 = self.col6_encoder(remapped_col6_ids)       # embedding维度
+                xe = self.edge_encoder(remapped_edge_type_ids)
+
+                # 拼接所有特征：连续特征 + 三个embedding特征
+                continuous_features = torch.cat([
+                    batch.x[:, :2],      # 第0、1维
+                    batch.x[:, 4:5],     # 第4维（索引4，实际第5维）
+                    batch.x[:, 6:]       # 第6维之后的所有维度
+                ], dim=1)
+                
+                x = torch.cat([continuous_features, x_node, x_col4, x_col6], dim=1)
+                # print(f"  batch.x形状: {x.shape}")
+                x = self.feature_projection(x)
         # GNN layers
             # print(f"  batch.x形状: {x.shape}")
             # print(f"  batch.edge_attr形状: {xe.shape}")
@@ -333,19 +373,20 @@ class GraphHead(nn.Module):
             #     true_class = batch.y[:, 1][net_node_mask].long()
             #     true_label = batch.y[net_node_mask]
             # else:
-            print(f"x.size:{x.size()}")
-            print(f"x:{x}")
+            # print(f"x.size:{x.size()}")
+            # print(f"x:{x}")
             
             pred = self.head_layers(x)
+            # pred = torch.sigmoid(pred) 
             # 删除以下4行调试打印语句
-            print(f"🔍 下游模型输出 pred 形状: {pred.shape}")
-            print(f"🔍 下游模型输出 pred 内容: {pred}")
-            # print(f"batch.y:{batch.y}")
-            # print(f"batch.y.size:{batch.y.size()}")
-            assert 0
+            # print(f"🔍 下游模型输出 pred 形状: {pred.shape}")
+            # print(f"🔍 下游模型输出 pred 内容: {pred}")
+            # # print(f"batch.y:{batch.y}")
+            # # print(f"batch.y.size:{batch.y.size()}")
+            # assert 0
             true_class = batch.y.long()
             true_label = batch.y
-
+            
         elif self.task_level == 'edge': 
             pred = self.head_layers(x)
             true_class = batch.y.long()
@@ -374,13 +415,28 @@ class GraphHead(nn.Module):
         # print(f"pred:{pred},true_label:{true_label}")
         # pred_squeezed = pred.squeeze()
 
-        # # 计算绝对误差
+        # # # 计算绝对误差
         # absolute_error = torch.abs(pred_squeezed - true_label)
         # print(f"绝对误差形状: {absolute_error.shape}")  # [N]
         # print(f"平均绝对误差 (MAE): {torch.mean(absolute_error).item():.4f}")       
         # print(f"pred_squeezed 范围: {pred_squeezed.min():.4f} ~ {pred_squeezed.max():.4f}")
         # print(f"true_label 范围: {true_label.min():.4f} ~ {true_label.max():.4f}") 
         # assert 0
+        # # 只在第一个epoch的前几个batch打印信息
+        # if hasattr(self, 'debug_counter'):
+        #     self.debug_counter += 1
+        # else:
+        #     self.debug_counter = 1
+        
+        # if self.debug_counter <= 5:  # 只打印前5次
+        #     pred_squeezed = pred.squeeze()
+        # absolute_error = torch.abs(pred_squeezed - true_label)
+        # print(f"\n=== 调试信息 (第{self.debug_counter}次前向传播) ===")
+        # print(f"平均绝对误差 (MAE): {torch.mean(absolute_error).item():.4f}")
+        # print(f"pred_squeezed 范围: {pred_squeezed.min():.4f} ~ {pred_squeezed.max():.4f}")
+        # print(f"true_label 范围: {true_label.min():.4f} ~ {true_label.max():.4f}")
+        # print("=" * 50)
+        
         return pred,true_class,true_label
     
 
