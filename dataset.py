@@ -5,34 +5,56 @@ import time
 from pathlib import Path
 from torch_geometric.data import InMemoryDataset, Data
 from torch_geometric.utils import to_undirected
-
-def normalized_power_centered_min_max(y, lower_bound=0.2, upper_bound=0.8):
+def normalized_power_simple_min_max(y):
     """
-    将数据归一化到 [lower_bound, upper_bound] 范围内，
-    并确保大部分数据集中在中间区域。
+    简单的Min-Max归一化到指定范围
     
     Args:
-        y (torch.Tensor): 原始数据。
-        lower_bound (float): 归一化后的最小值，默认为 0.2。
-        upper_bound (float): 归一化后的最大值，默认为 0.8。
+        y (torch.Tensor): 原始数据
+        lower_bound (float): 归一化后的最小值，默认为 0.2
+        upper_bound (float): 归一化后的最大值，默认为 0.8
         
     Returns:
-        torch.Tensor: 归一化后的数据。
+        torch.Tensor: 归一化后的数据
     """
-    # 计算均值和标准差
-    mean_y = y.mean()
-    std_y = y.std()
-
-    # 标准化
-    normalized_y = (y - mean_y) / std_y
+    # 直接使用Min-Max归一化
+    min_val = y.min()
+    max_val = y.max()
     
-    # 将标准化后的数据缩放到 [0, 1]
-    normalized_y = (normalized_y - normalized_y.min()) / (normalized_y.max() - normalized_y.min())
+    # 归一化到[0, 1]
+    normalized_y = (y - min_val) / (max_val - min_val)
     
-    # 将数据映射到 [lower_bound, upper_bound] 范围
-    stretched_y = normalized_y * (upper_bound - lower_bound) + lower_bound
+    # 映射到指定范围[lower_bound, upper_bound]
 
-    return stretched_y
+    
+    return normalized_y
+# def normalized_power_centered_min_max(y, lower_bound=0.2, upper_bound=0.8):
+#     """
+#     将数据归一化到 [lower_bound, upper_bound] 范围内，
+#     并确保大部分数据集中在中间区域。
+    
+#     Args:
+#         y (torch.Tensor): 原始数据。
+#         lower_bound (float): 归一化后的最小值，默认为 0.2。
+#         upper_bound (float): 归一化后的最大值，默认为 0.8。
+        
+#     Returns:
+#         torch.Tensor: 归一化后的数据。
+#     """
+#     # 计算均值和标准差
+#     mean_y = y.mean()
+#     std_y = y.std()
+
+#     # 标准化
+#     normalized_y = (y - mean_y) / std_y
+    
+#     # 将标准化后的数据缩放到 [0, 1]
+#     normalized_y = (normalized_y - normalized_y.min()) / (normalized_y.max() - normalized_y.min())
+    
+#     # 将数据映射到 [lower_bound, upper_bound] 范围
+#     stretched_y = normalized_y * (upper_bound - lower_bound) + lower_bound
+
+#     return stretched_y
 
 
 class SealSramDataset(InMemoryDataset):
@@ -143,8 +165,6 @@ class SealSramDataset(InMemoryDataset):
             g.x = g.node_type.view(-1, 1)
         
         # 拼接global_features到节点特征
-
-        
         if self.task_level == 'node':
             if hasattr(g, 'global_features') and hasattr(g, 'graph_id'):
                 # global_features: [num_subgraphs, 4]
@@ -157,10 +177,18 @@ class SealSramDataset(InMemoryDataset):
                 if not hasattr(g, 'y') or g.y is None:
                     g.y = torch.zeros(g.num_nodes, 1)
                 elif self.args.dataset == 'integrated_power_density_prediction_graph':
-                    g.y = normalized_power_centered_min_max(g.y)
+                    g.y = normalized_power_simple_min_max(g.y)
+                    g.x[:,4] = g.x[:,4] / g.x[:,4].max()
+                    g.x[:,6] = g.x[:,6] / g.x[:,6].max()
+                    # 将第0列和第1列设置为0
+                    g.x[:,0] = 0
+                    g.x[:,1] = 0
+                    g.edge_attr[:,0] = 0  # 第1列（索引0）
+                    g.edge_attr[:,2] = 0  # 第3列（索引2）
                 elif self.args.dataset == 'integrated_position_prediction_graph':
                     g.y = g.y/255
                     g.x[:,4] = g.x[:,4] / g.x[:,4].max()
+                    g.x[:,6] = g.x[:,6] / g.x[:,6].max()
                     # 将第0列和第1列设置为0
                     g.x[:,0] = 0
                     g.x[:,1] = 0
@@ -267,3 +295,6 @@ def performat_SramDataset(
     print(f"PID = {os.getpid()}")
     print(f"Building datasets from {name} took {timestr}")
     return None, dataset
+
+
+
