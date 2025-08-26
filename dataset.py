@@ -5,6 +5,9 @@ import time
 from pathlib import Path
 from torch_geometric.data import InMemoryDataset, Data
 from torch_geometric.utils import to_undirected
+import matplotlib.pyplot as plt
+from utils import plot_distribution_before_normalization
+
 def normalized_power_simple_min_max(y):
     """
     简单的Min-Max归一化到指定范围
@@ -152,6 +155,7 @@ class SealSramDataset(InMemoryDataset):
     def sram_graph_load(self, name, raw_path):
         logging.info(f"raw_path: {raw_path}")
         g = torch.load(raw_path, weights_only=False, map_location='cpu')
+        print(f"g:{g}")
         print(f"Loaded data type: {type(g)}")
         if isinstance(g, tuple):
             print(f"Tuple contents: {g}")
@@ -163,6 +167,10 @@ class SealSramDataset(InMemoryDataset):
         
         if hasattr(g, 'node_type'):
             g.x = g.node_type.view(-1, 1)
+            
+            
+        plot_distribution_before_normalization(g.y, self.args.dataset)
+        
         
         # 拼接global_features到节点特征
         if self.task_level == 'node':
@@ -177,6 +185,7 @@ class SealSramDataset(InMemoryDataset):
                 if not hasattr(g, 'y') or g.y is None:
                     g.y = torch.zeros(g.num_nodes, 1)
                 elif self.args.dataset == 'integrated_power_density_prediction_graph':
+                    
                     g.y = normalized_power_simple_min_max(g.y)
                     g.x[:,4] = g.x[:,4] / g.x[:,4].max()
                     g.x[:,6] = g.x[:,6] / g.x[:,6].max()
