@@ -19,7 +19,7 @@ if __name__ == "__main__":
     # Dataset setting
     #这里就是设置数据集，--dataset是数据集名称，通过split(+)分割，然后path.join自动寻找路径。训练时只要把数据集和代码放在一个文件夹下，然后改这里的名字就行
     #--neg_edge_ratio代表负边率，后面会有对应代码即在图中加入多少负边，--net_only代表仅用node节点而抛弃edge特征。看具体任务改，一般保持默认，只不过跑脚本时，注意--neg_edge_ratio的区别
-    parser.add_argument("--dataset", type=str, default="integrated_position_prediction_graph",choices=["integrated_power_density_prediction_graph","integrated_position_prediction_graph","integrated_route_with_global_features"], help="Names of datasets.integrated_position_prediction_graph+integrated_power_density_prediction_graph") # the first dataset is the training dataset
+    parser.add_argument("--dataset", type=str, default="integrated_power_density_prediction_graph",choices=["integrated_power_density_prediction_graph","integrated_position_prediction_graph","integrated_route_with_global_features"], help="Names of datasets.integrated_position_prediction_graph+integrated_power_density_prediction_graph") # the first dataset is the training dataset
     parser.add_argument('--neg_edge_ratio',type=float,default=0.5,help='The ratio of negative edges.') # 0.0 for classification, 0.5 for regression
     parser.add_argument('--net_only',type=int,default=0,help='Only use net nodes for node level task or not.')
     
@@ -28,8 +28,8 @@ if __name__ == "__main__":
     #--small_dataset_sample_rates代表小数据集的采样率，--large_dataset_sample_rates代表大数据集的目标边数，一般默认，看训练效果吧。
     # parser.add_argument("--small_dataset_sample_rates", type=float, default=1.0, help="The sample rate for small dataset.")
     parser.add_argument("--sample_ratio", type=float, default=1, help='子图采样')
-    parser.add_argument("--num_hops", type=int, default=2, help="Number of hops in subgraph sampling.")
-    parser.add_argument('--num_neighbors',type=int,default=16,help='The number of neighbors in subgraph sampling.')
+    parser.add_argument("--num_hops", type=int, default=3, help="Number of hops in subgraph sampling.")
+    parser.add_argument('--num_neighbors',type=int,default=32,help='The number of neighbors in subgraph sampling.')
     
     # Training setting
     #这部分是总体训练的超参数控制，为什么说总体，因为后面还有GNN+的超参数，以及downstream的超参数，分别对应上下游各自的参数，这里是总体的。
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     #但是图变了的话，这些参数应该是要重新调整的。
     parser.add_argument("--attn_dropout", type=float, default=0.7, help='Dropout for attentional networks')
     parser.add_argument("--global_model_type", type=str, default='None', choices=['Transformer' ,'BiasedTransformer', 'None'], help='Global attention mechanism settings')
-    parser.add_argument("--local_gnn_type", type=str, default='CustomGatedGCN', choices=['GCN', 'GIN', 'GINE', 'GENConv', 'GAT', 'PNA', 'CustomGatedGCN', 'CustomGCNConv', 'CustomGINEConv'], help='The setting of the global attention GNN layer')
+    parser.add_argument("--local_gnn_type", type=str, default='CustomGINEConv', choices=['GCN', 'GIN', 'GINE', 'GENConv', 'GAT', 'PNA', 'CustomGatedGCN', 'CustomGCNConv', 'CustomGINEConv'], help='The setting of the global attention GNN layer')
     parser.add_argument("--num_heads", type=int, default=2, help='The number of heads in multi-head attention')
     parser.add_argument("--layer_norm", type=int, default=0, help='Whether to use layer_norm in GNN+, if you use the attention mechanism, layernorm and batchnorm cannot both be equal to 1.')
     parser.add_argument("--batch_norm", type=int, default=1, help='Whether to use batch_norm in GNN+, if you use the attention mechanism, layernorm and batchnorm cannot both be equal to 1.')
@@ -89,10 +89,10 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default='gps_attention', choices=['clustergcn', 'resgatedgcn', 'gat', 'gcn', 'sage', 'gine', 'gps_attention'], help="The gnn model. Could be 'clustergcn', 'resgatedgcn', 'gat', 'gcn', 'sage', 'gine', 'gps_attention'.")
     parser.add_argument("--num_gnn_layers", type=int, default=4, help="Number of GNN layers.")
     parser.add_argument("--num_head_layers", type=int, default=2, help="Number of head layers.")
-    parser.add_argument("--hid_dim", type=int, default=16, help="Hidden layer dim.")
+    parser.add_argument("--hid_dim", type=int, default=32, help="Hidden layer dim.")
     parser.add_argument('--dropout', type=float, default=0.3, help='Dropout for neural networks.')
     parser.add_argument('--use_bn', type=int, default=0, help='0 or 1. Batch norm for neural networks.')
-    parser.add_argument('--act_fn', default='prelu', choices=['relu', 'elu', 'tanh', 'leakyrelu', 'prelu'], help='Activation function')
+    parser.add_argument('--act_fn', default='leakyrelu', choices=['relu', 'elu', 'tanh', 'leakyrelu', 'prelu'], help='Activation function')
     parser.add_argument('--use_stats', type=int, default=0, help='0 or 1. Circuit statistics features. Use in node task.')
 
     # Regression setting
