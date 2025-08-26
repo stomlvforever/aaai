@@ -16,19 +16,18 @@ from model import GraphHead
 from sampling import dataset_sampling
 # from balanced_mse import GAILoss, BMCLoss, BNILoss, train_gmm, WeightedMSE, get_lds_weights, BalancedSoftmax, FocalLoss, compute_class_weights
 import os
+# 在文件开头的import语句后添加
 import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics import r2_score
 from torch.optim.lr_scheduler import StepLR
+from utils import plot_pred_vs_true_scatter, collect_predictions_for_plot
 # from torch.utils.data.sampler import SubsetRandomSampler
 # from sram_dataset import LinkPredictionDataset
 # from sram_dataset import collate_fn, adaption_for_sgrl
 # from torch_geometric.data import Batch
 
 # from torch_geometric.loader import NeighborLoader, GraphSAINTRandomWalkSampler, GraphSAINTEdgeSampler, ShaDowKHopSampler
-
-NET = 0
-DEV = 1
-PIN = 2
-#logfer类记录训练过程的结果
 
 class Logger(object):
     """ 
@@ -196,7 +195,7 @@ def eval_epoch(args, loader, model, device,
     return logger.write_epoch(split)
 #回归任务训练模块
 def regress_train(args, regressor, optimizer, criterion,
-          train_loader, val_loader, test_loaders, max_label,
+          train_loader, val_loader, test_loader, max_label,
           device, scheduler=None):
     """
     Train the head model for regression task
@@ -247,46 +246,54 @@ def regress_train(args, regressor, optimizer, criterion,
                 batch_size=_true.squeeze().size(0), 
                 loss=loss.detach().cpu().item()
             )
-        print(f"\n===== Epoch {epoch}/{args.epochs} =====")            
+            
+        print(f"\n===== Epoch {epoch}/{args.epochs} =====")
+        
+        # 在评估之前先更新学习率
+        if scheduler is not None:
+            scheduler.step()
+            
         train_res = eval_epoch(
             args, train_loader, 
             regressor, device, split='train', criterion=criterion
         )    
         
-
-        # train_metrics = logger.write_epoch(split='train')  # 打印训练集结果
-        # print(f"Training Metrics: {train_res}")
-        
         ## ========== validation ========== ##
-        val_res = eval_epoch( #获得验证集结果
+        val_res = eval_epoch(
             args, val_loader, 
             regressor, device, split='val', criterion=criterion
         )
-        
-        # print(f"Validation Metrics: {val_res}")
-        
-        if scheduler is not None:
-            scheduler.step()
-            
-        ## update the best results so far
-        
-        #只有获得更优验证集结果时才在测试集上评估并更新最佳结果
-        # if  best_results['best_val_mae'] > val_res['mae']:
-        #     best_results['best_val_mae'] = val_res['mae']
-        #     best_results['best_val_loss'] = val_res['loss']
-        #     best_results['best_epoch'] = epoch
-        
-        test_results = []
+           
+        test_res = eval_epoch(
+            args, test_loader, 
+            regressor, device, split='test', 
+            criterion=criterion
+        )        
+
            
             ## ========== testing on other datasets ========== ##
             #在测试集上测试
-        for test_name in test_loaders.keys():
-            res = eval_epoch(
-                args, test_loaders[test_name], 
-                regressor, device, split='test', 
-                criterion=criterion
-            )
-            # test_results.append(res)
+        # for test_name in test_loaders.keys():
+        #     res = eval_epoch(
+        #         args, test_loaders[test_name], 
+        #         regressor, device, split='test', 
+        #         criterion=criterion
+        #     )
+        if epoch % 50 == 0 or epoch == args.epochs - 1:  # 每5个epoch或最后一个epoch绘制
+            print(f"正在生成第{epoch}个epoch的散点图...")
+            
+            # 收集训练集预测值和真实值
+            train_preds, train_trues = collect_predictions_for_plot(args, train_loader, regressor, device)
+            plot_pred_vs_true_scatter(train_preds, train_trues, epoch, "train")
+            
+            # 收集验证集预测值和真实值
+            # val_preds, val_trues = collect_predictions_for_plot(args, val_loader, regressor, device)
+            # plot_pred_vs_true_scatter(val_preds, val_trues, epoch, "val")
+            
+            # # 收集测试集预测值和真实值
+            # test_preds, test_trues = collect_predictions_for_plot(args, test_loader, regressor, device)
+            # plot_pred_vs_true_scatter(test_preds, test_trues, epoch, "test")
+            
         os.makedirs("downstream_model", exist_ok=True)
         torch.save(regressor.state_dict(), f"downstream_model/model_{epoch}-{args.regress_loss}.pth")
 
