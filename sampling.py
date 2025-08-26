@@ -80,7 +80,7 @@ def dataset_sampling(args, dataset):
     # 按比例采样训练集、验证集、测试集的节点（比如 20%）
     train_node_ind = sample_nodes_by_ratio(full_graph, ratio=args.sample_ratio)  
     val_node_ind = sample_nodes_by_ratio(full_graph, ratio=args.sample_ratio)  
-    # test_node_ind = sample_nodes_by_ratio(full_graph, ratio=args.sample_ratio)  
+    test_node_ind = sample_nodes_by_ratio(full_graph, ratio=args.sample_ratio)  
 
     # 创建数据加载器
     train_loader = NeighborLoader(
@@ -102,35 +102,43 @@ def dataset_sampling(args, dataset):
     )
 
     # 修改测试集处理逻辑：为每个测试子图创建独立的采样节点加载器
-    test_loaders = {}
-    for i, test_idx in enumerate(test_graph_indices):
-        # 创建只包含当前测试子图的临时图数据
-        test_mask = (full_graph.graph_id == test_idx)
-        test_subgraph_nodes = torch.nonzero(test_mask).squeeze()
+    # test_loaders = {}
+    # for i, test_idx in enumerate(test_graph_indices):
+    #     # 创建只包含当前测试子图的临时图数据
+    #     test_mask = (full_graph.graph_id == test_idx)
+    #     test_subgraph_nodes = torch.nonzero(test_mask).squeeze()
         
-        # 创建临时子图用于采样
-        temp_graph = Data(
-            x=full_graph.x[test_subgraph_nodes],
-            edge_index=full_graph.edge_index,  # 保持原始边索引
-            graph_id=torch.full((len(test_subgraph_nodes),), test_idx)
-        )
+    #     # 创建临时子图用于采样
+    #     temp_graph = Data(
+    #         x=full_graph.x[test_subgraph_nodes],
+    #         edge_index=full_graph.edge_index,  # 保持原始边索引
+    #         graph_id=torch.full((len(test_subgraph_nodes),), test_idx)
+    #     )
         
-        # 对当前测试子图进行采样，使用不同的种子
-        sampled_test_nodes = sample_nodes_by_ratio(temp_graph, ratio=args.sample_ratio, seed=50+i)
-        # 将采样结果映射回原始图的节点索引
-        actual_test_nodes = test_subgraph_nodes[sampled_test_nodes]
+    #     # 对当前测试子图进行采样，使用不同的种子
+    #     sampled_test_nodes = sample_nodes_by_ratio(temp_graph, ratio=args.sample_ratio, seed=50+i)
+    #     # 将采样结果映射回原始图的节点索引
+    #     actual_test_nodes = test_subgraph_nodes[sampled_test_nodes]
 
-        graph_name = dataset.graph_names[test_idx]
-        test_loaders[graph_name] = NeighborLoader(
-            full_graph,
-            num_neighbors=args.num_hops * [args.num_neighbors],
-            input_nodes=actual_test_nodes,  # 采样后的测试集节点
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
-        )
-
-    print(f"train_loader:{train_loader}, val_loader:{val_loader}, test_loader:{test_loaders}")
+    #     graph_name = dataset.graph_names[test_idx]
+    #     test_loaders[graph_name] = NeighborLoader(
+    #         full_graph,
+    #         num_neighbors=args.num_hops * [args.num_neighbors],
+    #         input_nodes=actual_test_nodes,  # 采样后的测试集节点
+    #         batch_size=args.batch_size,
+    #         shuffle=False,
+    #         num_workers=args.num_workers,
+    #     )
+    test_loader = NeighborLoader(
+        full_graph,
+        num_neighbors=args.num_hops * [args.num_neighbors],
+        input_nodes=test_node_ind,  # 直接使用第83行的采样结果
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
+    
+    print(f"train_loader:{train_loader}, val_loader:{val_loader}, test_loader:{test_loader}")
     
     max_label = None
-    return (train_loader, val_loader, test_loaders, max_label)
+    return (train_loader, val_loader, test_loader, max_label)
