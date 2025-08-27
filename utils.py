@@ -2,6 +2,7 @@ import torch
 import matplotlib.pyplot as plt
 import os
 import numpy as np
+from sklearn.metrics import r2_score
 
 def sample_nodes_by_ratio(graph, ratio=0.2, seed=42):
     """
@@ -114,7 +115,7 @@ def plot_true_values_distribution_before_sampling(dataset, dataset_name=None, sa
     
     return save_path
 
-def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_dir="scatter_plots"):
+def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_dir="scatter_plots4", device=None):
     """
     绘制真实值vs预测值的散点图
     Args:
@@ -123,94 +124,137 @@ def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_
         epoch: 当前epoch数
         split_name: 数据集名称 (train/val/test)
         save_dir: 保存目录
+        device: 计算设备，如果为None则自动检测
     """
     # 确保保存目录存在
     os.makedirs(save_dir, exist_ok=True)
     
-    # 转换为numpy数组
+    # 自动检测设备
+    if device is None:
+        if torch.is_tensor(pred_values) and pred_values.is_cuda:
+            device = pred_values.device
+        elif torch.is_tensor(true_values) and true_values.is_cuda:
+            device = true_values.device
+        else:
+            device = torch.device('cpu')
+    
+    # 在GPU上进行计算
     if torch.is_tensor(pred_values):
-        pred_values = pred_values.cpu().numpy().flatten()
+        pred_values = pred_values.to(device).flatten()
+    else:
+        pred_values = torch.tensor(pred_values, device=device).flatten()
+        
     if torch.is_tensor(true_values):
-        true_values = true_values.cpu().numpy().flatten()
+        true_values = true_values.to(device).flatten()
+    else:
+        true_values = torch.tensor(true_values, device=device).flatten()
     
-    # 创建散点图 - 横坐标为真实值，纵坐标为预测值
+    # 在GPU上计算统计量
+    min_val = torch.min(torch.min(pred_values), torch.min(true_values))
+    max_val = torch.max(torch.max(pred_values), torch.max(true_values))
+    
+    # 计算R²和MAE（在GPU上）
+    mae = torch.mean(torch.abs(pred_values - true_values))
+    
+    # 计算R² (在GPU上)
+    true_mean = torch.mean(true_values)
+    ss_tot = torch.sum((true_values - true_mean) ** 2)
+    ss_res = torch.sum((true_values - pred_values) ** 2)
+    r2 = 1 - (ss_res / ss_tot)
+    
+    # 只在绘图时转换到CPU
+    pred_cpu = pred_values.cpu().numpy()
+    true_cpu = true_values.cpu().numpy()
+    min_val_cpu = min_val.cpu().item()
+    max_val_cpu = max_val.cpu().item()
+    r2_cpu = r2.cpu().item()
+    mae_cpu = mae.cpu().item()
+    
+    # 创建散点图
     plt.figure(figsize=(8, 8))
-    plt.scatter(true_values, pred_values, alpha=0.6, s=20)
+    plt.scatter(true_cpu, pred_cpu, alpha=0.6, s=20)
+    plt.plot([min_val_cpu, max_val_cpu], [min_val_cpu, max_val_cpu], 'r--', linewidth=2, label='Perfect Prediction')
     
-    # 添加理想预测线 (y=x)
-    min_val = min(pred_values.min(), true_values.min())
-    max_val = max(pred_values.max(), true_values.max())
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Perfect Prediction')
-    
-    # 计算R²和MAE
-    r2 = r2_score(true_values, pred_values)
-    mae = np.mean(np.abs(pred_values - true_values))
-    
-    # 设置图表属性 - 交换坐标轴标签
+    # 设置图表属性
     plt.xlabel('True Values', fontsize=12)
     plt.ylabel('Predicted Values', fontsize=12)
-    plt.title(f'True vs Pred - Epoch {epoch} ({split_name})\nR² = {r2:.4f}, MAE = {mae:.4f}', fontsize=14)
+    plt.title(f'True vs Pred - Epoch {epoch} ({split_name})\nR² = {r2_cpu:.4f}, MAE = {mae_cpu:.4f}', fontsize=14)
     plt.legend()
     plt.grid(True, alpha=0.3)
     
     # 保存图片
     filename = f"{save_dir}/scatter_epoch_{epoch}_{split_name}.png"
     plt.savefig(filename, dpi=300, bbox_inches='tight')
-    plt.close()  # 关闭图形以释放内存
+    plt.close()
     
     print(f"散点图已保存: {filename}")
 
-def collect_predictions_for_plot(args, loader, model, device):
-    """
-    收集所有预测值和真实值用于绘图
-    """
-    model.eval()
-    all_preds = []
-    all_trues = []
+# def collect_predictions_for_plot(args, loader, model, device):
+#     """
+#     收集所有预测值和真实值用于绘图（保持在GPU上）
+#     """
+#     model.eval()
+#     all_preds = []
+#     all_trues = []
     
-    with torch.no_grad():
-        for batch in loader:
-            pred, _, label_true = model(batch.to(device))
-            if args.task == 'regression':
-                # 确保pred是[N, 1]形状
-                if pred.ndim == 1:
-                    pred = pred.view(-1, 1)
-                elif pred.size(1) != 1:
-                    pred = pred.view(-1, 1)
+#     with torch.no_grad():
+#         for batch in loader:
+#             pred, _, label_true = model(batch.to(device))
+#             if args.task == 'regression':
+#                 # 确保pred是[N, 1]形状
+#                 if pred.ndim == 1:
+#                     pred = pred.view(-1, 1)
+#                 elif pred.size(1) != 1:
+#                     pred = pred.view(-1, 1)
                 
-                # 处理true张量的维度 - 与compute_loss函数保持一致
-                true = label_true.float()
-                if true.ndim == 1:
-                    # 如果true是1D张量，将其转换为2D [N, 1]
-                    true = true.view(-1, 1)
-                elif true.size(1) != 1:
-                    # 如果true有多列，只取第一列（真实值）
-                    true = true[:, 0].view(-1, 1)
+#                 # 处理true张量的维度
+#                 true = label_true.float()
+#                 if true.ndim == 1:
+#                     true = true.view(-1, 1)
+#                 elif true.size(1) != 1:
+#                     true = true[:, 0].view(-1, 1)
                 
-                pred = pred.float()
+#                 pred = pred.float()
                 
-                all_preds.append(pred.cpu())
-                all_trues.append(true.cpu())
+#                 # pred = pred.squeeze()
+#                 # # 添加调试信息
+#                 # print(f"散点图收集 - pred范围: {pred.min():.4f} ~ {pred.max():.4f}")                
+#                 # 保持在GPU上，不转换到CPU
+#                 all_preds.append(pred)
+#                 all_trues.append(true)
     
-    # 合并所有批次的数据
-    all_preds = torch.cat(all_preds, dim=0)
-    all_trues = torch.cat(all_trues, dim=0)
+#     # 合并所有批次的数据（仍在GPU上）
+#     all_preds = torch.cat(all_preds, dim=0)
+#     all_trues = torch.cat(all_trues, dim=0)
     
-    return all_preds, all_trues
+#     return all_preds, all_trues
 
-def plot_distribution_before_normalization(data, dataset_name, save_dir="distribution_plots"):
+def plot_distribution_before_normalization(data, dataset_name, save_dir="distribution_plots", device=None):
     """
-    绘制归一化前的数据分布图
-    Args:
-        data (torch.Tensor): 需要绘制分布的数据 (如 g.y)
-        dataset_name (str): 数据集名称
-        save_dir (str): 保存图片的目录，默认为 "distribution_plots"
+    绘制归一化前的数据分布图（支持GPU计算）
     """
-    # 确保数据在CPU上并转换为numpy格式
+    # 自动检测设备
+    if device is None and torch.is_tensor(data):
+        device = data.device
+    
+    # 在GPU上计算统计量
     if torch.is_tensor(data):
-        data_np = data.cpu().numpy()
+        data_tensor = data.to(device) if device else data
+        min_val = torch.min(data_tensor).item()
+        max_val = torch.max(data_tensor).item()
+        mean_val = torch.mean(data_tensor.float()).item()
+        std_val = torch.std(data_tensor.float()).item()
+        median_val = torch.median(data_tensor.flatten().float()).values.item()
+        
+        # 只在绘图时转换到CPU
+        data_np = data_tensor.cpu().numpy()
     else:
         data_np = np.array(data)
+        min_val = data_np.min()
+        max_val = data_np.max()
+        mean_val = data_np.mean()
+        std_val = data_np.std()
+        median_val = np.median(data_np.flatten())
     
     # 创建图形
     plt.figure(figsize=(10, 6))
@@ -232,10 +276,10 @@ def plot_distribution_before_normalization(data, dataset_name, save_dir="distrib
     
     # 打印统计信息
     print(f"\n=== 归一化前数据分布统计 - {dataset_name} ===")
-    print(f"最小值: {data_np.min():.6f}")
-    print(f"最大值: {data_np.max():.6f}")
-    print(f"均值: {data_np.mean():.6f}")
-    print(f"标准差: {data_np.std():.6f}")
-    print(f"中位数: {np.median(data_np.flatten()):.6f}")
+    print(f"最小值: {min_val:.6f}")
+    print(f"最大值: {max_val:.6f}")
+    print(f"均值: {mean_val:.6f}")
+    print(f"标准差: {std_val:.6f}")
+    print(f"中位数: {median_val:.6f}")
     print(f"图像已保存至: {save_path}")
     print(f"==============================\n")
