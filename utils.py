@@ -115,7 +115,7 @@ def plot_true_values_distribution_before_sampling(dataset, dataset_name=None, sa
     
     return save_path
 
-def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_dir="scatter_plots4", device=None):
+def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_dir=None, device=None):
     """
     绘制真实值vs预测值的散点图
     Args:
@@ -123,9 +123,14 @@ def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_
         true_values: 真实值数组  
         epoch: 当前epoch数
         split_name: 数据集名称 (train/val/test)
-        save_dir: 保存目录
+        save_dir: 保存目录，如果为None则自动生成基于PID的目录
         device: 计算设备，如果为None则自动检测
     """
+    # 动态生成保存目录（基于进程ID）
+    if save_dir is None:
+        pid = os.getpid()
+        save_dir = f"scatter_plots_pid_{pid}"
+    
     # 确保保存目录存在
     os.makedirs(save_dir, exist_ok=True)
     
@@ -187,7 +192,7 @@ def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"散点图已保存: {filename}")
+    print(f"散点图已保存: {filename} (PID: {os.getpid()})")
 
 # def collect_predictions_for_plot(args, loader, model, device):
 #     """
