@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import r2_score
 from torch.optim.lr_scheduler import StepLR
-from utils import plot_pred_vs_true_scatter, collect_predictions_for_plot
+from utils import plot_pred_vs_true_scatter
 # from torch.utils.data.sampler import SubsetRandomSampler
 # from sram_dataset import LinkPredictionDataset
 # from sram_dataset import collate_fn, adaption_for_sgrl
@@ -214,7 +214,8 @@ def regress_train(args, regressor, optimizer, criterion,
     for epoch in range(args.epochs):#遍历epoch
         logger = Logger(task=args.task, max_label=max_label)#开启日志记录器
         regressor.train()#开启训练模式
-        # print(f"你好")
+        epoch_train_preds = []
+        epoch_train_trues = []
         for i, batch in enumerate(tqdm(train_loader, desc=f'Epoch:{epoch}')):#遍历loader
             optimizer.zero_grad()
 
@@ -224,9 +225,18 @@ def regress_train(args, regressor, optimizer, criterion,
             y_pred,true_class, y = regressor(batch.to(device))
             y_pred = y_pred.float()
             y = y.float()
+            
+
+            
+            # print(f"y_pred范围: {y_pred.min():.4f} ~ {y_pred.max():.4f}")
+            # print(f"y范围: {y.min():.4f} ~ {y.max():.4f}")
             loss, pred, true = compute_loss(args, y_pred, y, criterion=criterion)
             _true = true.detach().to('cpu', non_blocking=True)
             _pred = y_pred.detach().to('cpu', non_blocking=True)
+            
+            epoch_train_preds.append(y_pred.detach().cpu())
+            epoch_train_trues.append(y.detach().cpu())
+            
             #后向传播并更新梯度
             loss.backward()
             
@@ -279,11 +289,18 @@ def regress_train(args, regressor, optimizer, criterion,
         #         regressor, device, split='test', 
         #         criterion=criterion
         #     )
+        
+        '''画出每一段范围epoch之后真实值和预测值的对照散点图'''
         if epoch % 50 == 0 or epoch == args.epochs - 1:  # 每5个epoch或最后一个epoch绘制
             print(f"正在生成第{epoch}个epoch的散点图...")
             
+           
             # 收集训练集预测值和真实值
-            train_preds, train_trues = collect_predictions_for_plot(args, train_loader, regressor, device)
+            train_preds = torch.cat(epoch_train_preds, dim=0)
+            train_trues = torch.cat(epoch_train_trues, dim=0)
+            # print(f"y_pred范围: {train_preds.min():.4f} ~ {train_preds.max():.4f}")
+            # print(f"y范围: {train_trues.min():.4f} ~ {train_trues.max():.4f}")   
+                      
             plot_pred_vs_true_scatter(train_preds, train_trues, epoch, "train")
             
             # 收集验证集预测值和真实值
