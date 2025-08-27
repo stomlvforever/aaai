@@ -214,8 +214,14 @@ def regress_train(args, regressor, optimizer, criterion,
     for epoch in range(args.epochs):#遍历epoch
         logger = Logger(task=args.task, max_label=max_label)#开启日志记录器
         regressor.train()#开启训练模式
+        
         epoch_train_preds = []
         epoch_train_trues = []
+        epoch_val_preds = []
+        epoch_val_trues = []
+        epoch_test_preds = []
+        epoch_test_trues = []   
+             
         for i, batch in enumerate(tqdm(train_loader, desc=f'Epoch:{epoch}')):#遍历loader
             optimizer.zero_grad()
 
@@ -236,7 +242,11 @@ def regress_train(args, regressor, optimizer, criterion,
             
             epoch_train_preds.append(y_pred.detach().cpu())
             epoch_train_trues.append(y.detach().cpu())
-            
+            epoch_val_preds.append(y_pred.detach().cpu())
+            epoch_val_trues.append(y.detach().cpu())
+            epoch_test_preds.append(y_pred.detach().cpu())
+            epoch_test_trues.append(y.detach().cpu()) 
+                       
             #后向传播并更新梯度
             loss.backward()
             
@@ -297,12 +307,17 @@ def regress_train(args, regressor, optimizer, criterion,
            
             # 收集训练集预测值和真实值
             train_preds = torch.cat(epoch_train_preds, dim=0)
-            train_trues = torch.cat(epoch_train_trues, dim=0)
-            # print(f"y_pred范围: {train_preds.min():.4f} ~ {train_preds.max():.4f}")
-            # print(f"y范围: {train_trues.min():.4f} ~ {train_trues.max():.4f}")   
-                      
-            plot_pred_vs_true_scatter(train_preds, train_trues, epoch, "train")
+            train_trues = torch.cat(epoch_train_trues, dim=0)                      
+            plot_pred_vs_true_scatter(train_preds, train_trues, epoch, "train") # 根据进程pid创建文件夹
             
+            # val_preds = torch.cat(epoch_val_preds, dim=0)
+            # val_trues = torch.cat(epoch_val_trues, dim=0)                      
+            # plot_pred_vs_true_scatter(val_preds, val_trues, epoch, "val") # 根据进程pid创建文件夹
+              
+            # test_preds = torch.cat(epoch_test_preds, dim=0)
+            # test_trues = torch.cat(epoch_test_trues, dim=0)                      
+            # plot_pred_vs_true_scatter(test_preds, test_trues, epoch, "test") # 根据进程pid创建文件夹
+              
             # 收集验证集预测值和真实值
             # val_preds, val_trues = collect_predictions_for_plot(args, val_loader, regressor, device)
             # plot_pred_vs_true_scatter(val_preds, val_trues, epoch, "val")
