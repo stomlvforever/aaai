@@ -187,6 +187,9 @@ def eval_epoch(args, loader, model, device,
             loss, predict_class, true = compute_loss(args, pred, class_true, criterion=criterion)
             _true = true.detach().to('cpu', non_blocking=True)
             _pred = predict_class.detach().to('cpu', non_blocking=True)
+            # print(f"_true:{_true},_pred:{_pred},loss:{loss}")  
+            # print(f"_true.size:{_true.size()},_pred.size:{_pred.size()}")  
+            # assert 0
             logger.update_stats(true=_true,
                                 pred=_pred,
                                 batch_size=_true.size(0),
@@ -239,6 +242,9 @@ def regress_train(args, regressor, optimizer, criterion,
             loss, pred, true = compute_loss(args, y_pred, y, criterion=criterion)
             _true = true.detach().to('cpu', non_blocking=True)
             _pred = y_pred.detach().to('cpu', non_blocking=True)
+
+            # print(f"pred.size:{_pred.size()}")                   
+            # print(f"true.size:{_true.size()}")
             
             epoch_train_preds.append(y_pred.detach().cpu())
             epoch_train_trues.append(y.detach().cpu())
@@ -307,7 +313,9 @@ def regress_train(args, regressor, optimizer, criterion,
            
             # 收集训练集预测值和真实值
             train_preds = torch.cat(epoch_train_preds, dim=0)
-            train_trues = torch.cat(epoch_train_trues, dim=0)                      
+            train_trues = torch.cat(epoch_train_trues, dim=0)   
+            # print(f"pred.size:{train_preds.size()}")                   
+            # print(f"true.size:{train_trues.size()}")
             plot_pred_vs_true_scatter(train_preds, train_trues, epoch, "train") # 根据进程pid创建文件夹
             
             # val_preds = torch.cat(epoch_val_preds, dim=0)
@@ -339,7 +347,7 @@ def regress_train(args, regressor, optimizer, criterion,
 
 #分类任务训练模块
 def class_train(args, classifier,optimizer_classifier, 
-          train_loader, val_loader, test_loaders, max_label,
+          train_loader, val_loader, test_loader, max_label,
           device, scheduler=None):
     """
     Train model for capacitance classification task
@@ -356,9 +364,6 @@ def class_train(args, classifier,optimizer_classifier,
     optimizer_classifier.zero_grad()
 
     # create the directory to save the model
-    classifier_save_dir = os.path.join("models_node_cap_classifier")
-    
-    os.makedirs(classifier_save_dir, exist_ok=True)
     
     # initialize the best model metrics
 
@@ -418,10 +423,21 @@ def class_train(args, classifier,optimizer_classifier,
                 batch_size=_class_true.squeeze().size(0), 
                 loss=class_loss if isinstance(class_loss, float) else class_loss.detach().cpu().item()
             )
+            
 
+            
         print(f"\n===== Epoch {epoch}/{args.epochs} - Elapsed: {time.time() - epoch_start_time:.2f}s =====")
+        
+        if scheduler is not None:
+            scheduler.step()
+            
         print("Classification results:")
         logger.write_epoch(split='train')
+        
+        train_class_res = eval_epoch(
+            args, train_loader,
+            classifier, device, split='train', criterion=criterion
+        )        
         
         ## ========== validation ========== ##
         val_class_res = eval_epoch(
@@ -430,31 +446,33 @@ def class_train(args, classifier,optimizer_classifier,
         )
         #visualize_tsne(classifier, val_loader, device, num_samples=2000)
         
-        if scheduler is not None:
-            scheduler.step()
-            
-        ## ========== testing on other datasets ========== ##
-        test_class_results = {}           
-        eval_flag = False
 
-        # if the f1 of the current classifier model is the highest, save the best model
-        if val_class_res['f1'] > best_f1:
-            best_f1 = val_class_res['f1']
-            eval_flag = True
-        
-        if eval_flag :
-            for test_name in test_loaders.keys():
-                print(test_name)
-                test_class_res = eval_epoch(
-                    args, test_loaders[test_name], 
+        test_class_res = eval_epoch(
+                    args, test_loader, 
                     classifier, device, split='test', criterion=criterion
                 )
-                test_class_results[test_name] = test_class_res
+        ## ========== testing on other datasets ========== ##
+        # test_class_results = {}           
+        # eval_flag = False
+
+        # # if the f1 of the current classifier model is the highest, save the best model
+        # if val_class_res['f1'] > best_f1:
+        #     best_f1 = val_class_res['f1']
+        #     eval_flag = True
         
-        print( "=====================================")
-        print(f" Best epoch: {epoch}, f1: {val_class_res['f1']}")
-        print(f" Test results: {[res for res in test_class_results.values()]}")
-        print( "=====================================")
+        # if eval_flag :
+        #     for test_name in test_loaders.keys():
+        #         print(test_name)
+        #         test_class_res = eval_epoch(
+        #             args, test_loaders[test_name], 
+        #             classifier, device, split='test', criterion=criterion
+        #         )
+        #         test_class_results[test_name] = test_class_res
+        
+        # print( "=====================================")
+        # print(f" Best epoch: {epoch}, f1: {val_class_res['f1']}")
+        # print(f" Test results: {[res for res in test_class_results.values()]}")
+        # print( "=====================================")
 
 #下游训练模型，即按照任务类别调用不同的训练模块
 def downstream_train(args, dataset, device, cl_embeds=None):
