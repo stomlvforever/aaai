@@ -11,10 +11,6 @@ from torch_geometric.nn.aggr import AttentionalAggregation
 from gps_layer import GPSLayer
 
 
-# NET = 0
-# DEV = 1
-# PIN = 2
-
 
 class GraphHead(nn.Module):
     """ GNN head for graph-level prediction.
@@ -59,46 +55,10 @@ class GraphHead(nn.Module):
         batch_norm = args.batch_norm
         task_level = args.task_level
         
-        ## circuit statistics encoder + PE encoder + node&edge type encoders
-        #确保隐藏维度层数被三整除并将它平均分配给三种编码器
-        # if args.use_stats + self.use_cl == 2:
-        #     assert hidden_dim % 3 == 0, \
-        #         "hidden_dim should be divided by 3 (3 types of encoders)"
-        #     node_embed_dim = hidden_dim // 3
-
-        # ## circuit statistics/pe encoder + node&edge type encoders
-        # #同理
-        # elif self.use_stats + self.use_cl == 1:
-        #     assert hidden_dim % 2 == 0, \
-        #         "hidden_dim should be divided by 2 (2 types of encoders)"
-        #     node_embed_dim = hidden_dim // 2
-
-        # ## only use node&edge type encoders
-        # else:
-        #     pass
-
-        # ## Contrastive learning encoder
-        # #图对比学习用到的编码器
-        # if self.use_cl:
-        #     self.cl_linear = nn.Linear(args.cl_hid_dim, node_embed_dim)
-
-        ## Circuit Statistics encoder, producing matrix C
-        # if self.use_stats:#为不同类型节点定义不同的编码器，输入维度17，输出维度node_embed_dim
-        #     ## add node_attr transform layer for net/device/pin nodes, by shan
-        #     self.net_attr_layers = nn.Linear(17, node_embed_dim, bias=True)
-        #     self.dev_attr_layers = nn.Linear(17, node_embed_dim, bias=True)
-        #     ## pin attributes are {0, 1, 2} for gate pin, source/drain pin, and base pin
-        #     self.pin_attr_layers = nn.Embedding(17, node_embed_dim)
-        #     self.c_embed_dim = node_embed_dim
         
-        #定义节点和边的编码器，将节点类型和边类型编码为向量
-        ## Node / Edge type encoders.
-        ## Node attributes are {0, 1, 2} for net, device, and pin
-        # 在 __init__ 方法中，node_encoder 定义之后添加
         if self.task_level == 'node':
             node_type_vocab_size = getattr(args, 'node_type_vocab_size', 142)
             self.node_encoder = nn.Embedding(num_embeddings=node_type_vocab_size, embedding_dim=node_embed_dim)
-            
             # 添加第四列和第六列的 embedding 层
             col4_vocab_size = getattr(args, 'col4_vocab_size', 8)  # 根据实际数据调整
             col6_vocab_size = getattr(args, 'col6_vocab_size', 2)  # 根据实际数据调整
@@ -106,6 +66,14 @@ class GraphHead(nn.Module):
             self.col6_encoder = nn.Embedding(num_embeddings=col6_vocab_size, embedding_dim=node_embed_dim)
             self.edge_encoder = nn.Embedding(num_embeddings=4, embedding_dim=node_embed_dim)       
             concatenated_dim = 3 * node_embed_dim + 11
+            self.feature_projection = nn.Linear(concatenated_dim, node_embed_dim)
+            
+        elif self.task_level == 'edge':
+            node_type_vocab_size = getattr(args, 'node_type_vocab_size', 142)
+            self.node_encoder = nn.Embedding(num_embeddings=node_type_vocab_size, embedding_dim=node_embed_dim)
+            col4_vocab_size = getattr(args, 'col4_vocab_size', 8)
+            self.col4_encoder = nn.Embedding(num_embeddings=col4_vocab_size, embedding_dim=node_embed_dim)
+            concatenated_dim = 2 * node_embed_dim + 12
             self.feature_projection = nn.Linear(concatenated_dim, node_embed_dim)
             
         # GNN layers
@@ -252,14 +220,7 @@ class GraphHead(nn.Module):
                 unique_col4_types, col4_inverse = torch.unique(col4_ids, return_inverse=True)
                 unique_col6_types, col6_inverse = torch.unique(col6_ids, return_inverse=True)
                 unique_edge_types, edge_inverse = torch.unique(edge_type_ids, return_inverse=True)
-                
-                # # 🔍 打印重映射信息
-                # print(f"🔍 重映射信息:")
-                # print(f"  unique_node_types数量: {len(unique_node_types)}, 最大重映射ID: {node_inverse.max()}")
-                # print(f"  unique_col4_types数量: {len(unique_col4_types)}, 最大重映射ID: {col4_inverse.max()}")
-                # print(f"  unique_col6_types数量: {len(unique_col6_types)}, 最大重映射ID: {col6_inverse.max()}")
-                # print(f"  unique_edge_types数量: {len(unique_edge_types)}, 最大重映射ID: {edge_inverse.max()}")
-                
+
                 # 创建重映射的ID
                 remapped_node_type_ids = node_inverse.to(batch.x.device)
                 remapped_col4_ids = col4_inverse.to(batch.x.device)
@@ -295,13 +256,6 @@ class GraphHead(nn.Module):
                 unique_col6_types, col6_inverse = torch.unique(col6_ids, return_inverse=True)
                 unique_edge_types, edge_inverse = torch.unique(edge_type_ids, return_inverse=True)
                 
-                # # 🔍 打印重映射信息
-                # print(f"🔍 重映射信息:")
-                # print(f"  unique_node_types数量: {len(unique_node_types)}, 最大重映射ID: {node_inverse.max()}")
-                # print(f"  unique_col4_types数量: {len(unique_col4_types)}, 最大重映射ID: {col4_inverse.max()}")
-                # print(f"  unique_col6_types数量: {len(unique_col6_types)}, 最大重映射ID: {col6_inverse.max()}")
-                # print(f"  unique_edge_types数量: {len(unique_edge_types)}, 最大重映射ID: {edge_inverse.max()}")
-                
                 # 创建重映射的ID
                 remapped_node_type_ids = node_inverse.to(batch.x.device)
                 remapped_col4_ids = col4_inverse.to(batch.x.device)
@@ -324,6 +278,34 @@ class GraphHead(nn.Module):
                 x = torch.cat([continuous_features, x_node, x_col4, x_col6], dim=1)
                 # print(f"  batch.x形状: {x.shape}")
                 x = self.feature_projection(x)
+                
+        elif self.task_level == 'edge':
+            if self.dataset_name == 'integrated_power_density_prediction_graph':
+                node_type_ids = batch.x[:, 2].long()  # 第3维：节点类型
+                col4_ids = batch.x[:, 3].long()       # 第4维：需要embedding的特征
+                edge_type_ids = batch.edge_attr[batch.e_id, 1].long()
+                
+                unique_node_types, node_inverse = torch.unique(node_type_ids, return_inverse=True)
+                unique_col4_types, col4_inverse = torch.unique(col4_ids, return_inverse=True)
+                unique_edge_types, edge_inverse = torch.unique(edge_type_ids, return_inverse=True)
+                
+                x_node = self.node_encoder(remapped_node_type_ids)  # embedding维度
+                x_col4 = self.col4_encoder(remapped_col4_ids)       # embedding维度
+                xe = self.edge_encoder(remapped_edge_type_ids)
+                
+                remapped_node_type_ids = node_inverse.to(batch.x.device)
+                remapped_col4_ids = col4_inverse.to(batch.x.device)
+                remapped_edge_type_ids = edge_inverse.to(batch.x.device)
+                
+                continuous_features = torch.cat([
+                    batch.x[:, :2],      # 第0、1维
+                    batch.x[:, 4:5],     # 第4维（索引4，实际第5维）
+                ], dim=1)
+                
+                x = torch.cat([continuous_features, x_node, x_col4], dim=1)
+                # print(f"  batch.x形状: {x.shape}")
+                x = self.feature_projection(x)
+                
         # GNN layers
             # print(f"  batch.x形状: {x.shape}")
             # print(f"  batch.edge_attr形状: {xe.shape}")
@@ -412,15 +394,16 @@ class GraphHead(nn.Module):
             raise ValueError('Invalid task level')
         
         # print(f"pred:{pred},true_class:{true_class},true_label:{true_label}")
-        # print(f"pred:{pred},true_label:{true_label}")
+        # print(f"pred.size:{pred.size()},true_class.size:{true_class.size()},true_label.size:{true_label.size()}")        
         # pred_squeezed = pred.squeeze()
-
+        # print(f"pred_squeezed 范围: {pred_squeezed.min():.4f} ~ {pred_squeezed.max():.4f}")
+        # print(f"true_label 范围: {true_label.min():.4f} ~ {true_label.max():.4f}")         
         # # # 计算绝对误差
         # absolute_error = torch.abs(pred_squeezed - true_label)
         # print(f"绝对误差形状: {absolute_error.shape}")  # [N]
         # print(f"平均绝对误差 (MAE): {torch.mean(absolute_error).item():.4f}")       
-        # print(f"pred_squeezed 范围: {pred_squeezed.min():.4f} ~ {pred_squeezed.max():.4f}")
-        # print(f"true_label 范围: {true_label.min():.4f} ~ {true_label.max():.4f}") 
+
+
         # assert 0
         # # 只在第一个epoch的前几个batch打印信息
         # if hasattr(self, 'debug_counter'):
