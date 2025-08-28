@@ -33,15 +33,18 @@ def dataset_sampling(args, dataset):
         dataset, 
         dataset_name=args.dataset
     )
-    # print(f"dataset[0].x[:,6].min:{dataset[0].x[:,6].min()}")
-    # print(f"dataset[0].x[:,6].max:{dataset[0].x[:,6].max()}")    
-    print(f"dataset[0].x:{dataset[0].x}")
+    # print(f"dataset[0].x[:,0].min:{dataset[0].x[:,0].min()}")
+    # print(f"dataset[0].x[:,0].max:{dataset[0].x[:,0].max()}")    
+    # print(f"dataset[0].x[:,1].min:{dataset[0].x[:,1].min()}")   
+    # print(f"dataset[0].x[:,1].max:{dataset[0].x[:,1].max()}")   
+    # # print(f"dataset[0].x:{dataset[0].x}")
 
-    print(f"dataset[0]:{dataset[0]}")
-    # print(f"dataset[0].y:{dataset[0].y}")
+    # print(f"dataset[0]:{dataset[0]}")
+    # print(f"dataset[0].y.unique:{dataset[0].y.unique()}")
     # print(f"dataset[0].edge_index:{dataset[0].edge_index}")    
     # print(f"dataset[0].edge_attr:{dataset[0].edge_attr}")
-    assert 0
+    # assert 0
+    
     all_graph_indices = np.arange(30)
     np.random.shuffle(all_graph_indices)
     train_graph_indices = all_graph_indices[:15]
