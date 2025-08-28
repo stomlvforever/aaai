@@ -6,7 +6,7 @@ from pathlib import Path
 from torch_geometric.data import InMemoryDataset, Data
 from torch_geometric.utils import to_undirected
 import matplotlib.pyplot as plt
-from utils import plot_distribution_before_normalization
+from utils import plot_distribution_before_normalization, convert_position_to_classification_labels
 
 def normalized_power_simple_min_max(y):
     """
@@ -78,13 +78,13 @@ class SealSramDataset(InMemoryDataset):
         self.task_type = task_type
         
         # 分类任务数据集
-        self.classification_datasets = [
+        self.classification_datasets = ['integrated_position_prediction_graph'
             # 示例：'capacitance_classification_graph' （如果有分类任务）
         ]
         
         # 回归任务数据集（全部归到此处）
         self.regression_datasets = [
-            'integrated_position_prediction_graph',            
+            # 'integrated_position_prediction_graph',            
             'integrated_power_density_prediction_graph',
             'integrated_route_with_global_features',
             'integrated_floorplan_area_prediction_graph'
@@ -195,7 +195,13 @@ class SealSramDataset(InMemoryDataset):
                     g.edge_attr[:,0] = 0  # 第1列（索引0）
                     g.edge_attr[:,2] = 0  # 第3列（索引2）
                 elif self.args.dataset == 'integrated_position_prediction_graph':
+                    # 原始归一化
                     g.y = g.y/255
+                    
+                    # 如果是分类任务，转换为分类标签
+                    num_classes = getattr(self.args, 'num_classes', 64)
+                    g.y = convert_position_to_classification_labels(g.y, num_classes)
+                    
                     g.x[:,4] = g.x[:,4] / g.x[:,4].max()
                     g.x[:,6] = g.x[:,6] / g.x[:,6].max()
                     # 将第0列和第1列设置为0
@@ -206,9 +212,26 @@ class SealSramDataset(InMemoryDataset):
                 # elif self.args.dataset == 'integrated_route_with_global_features':
                 # elif self.args.dataset == 'integrated_floorplan_area_prediction_graph':
         elif self.task_level == 'edge':
-            if not hasattr(g, 'y') or g.y is None:
-                g.y = torch.zeros(g.num_nodes, 1)
-            #  elif self.args.dataset == 'integrated_route_with_global_features':            
+            if hasattr(g, 'global_features') and hasattr(g, 'graph_id'):
+                # global_features: [num_subgraphs, 4]
+                # graph_id: [num_nodes] - 每个节点对应的子图ID
+                # 根据graph_id索引对应的global_features
+                node_global_features = g.global_features[g.graph_id]  # [num_nodes, 4]
+
+                # 将global_features拼接到节点特征x后面
+                g.x = torch.cat([g.x, node_global_features], dim=1)  # [num_nodes, 10+4=14]
+                if not hasattr(g, 'y') or g.y is None:
+                    g.y = torch.zeros(g.num_nodes, 1)
+                elif self.args.dataset == 'integrated_route_with_global_features':
+                    g.y = g.y/g.y.max()
+                    g.x[:,4] = g.x[:,4] / g.x[:,4].max()
+                    g.x[:,0] = g.x[:,0] / g.x[:,0].max()
+                    g.x[:,1] = g.x[:,1] / g.x[:,1].max()
+                    g.edge_attr[:,0] = 0  # 第1列（索引0）
+                    g.edge_attr[:,2] = 0
+                    g.edge_attr[:,3] = 0
+                    g.edge_attr[:,4] = 0
+                    g.edge_attr[:,5] = 0
             # if hasattr(g, 'edge_index'):
             #     g.edge_label_index = g.edge_index
             #     g.edge_label = torch.zeros(g.num_edges, 1)
@@ -285,6 +308,11 @@ def performat_SramDataset(
     task_level="node",
 ):
     start = time.perf_counter()
+    
+    # 根据args.task动态设置task_type
+    task_type = "regression"  # 默认值
+    if args and hasattr(args, 'task'):
+        task_type = args.task
 
     try:
         dataset = SealSramDataset(
@@ -294,7 +322,7 @@ def performat_SramDataset(
             neg_edge_ratio=neg_edge_ratio,
             to_undirected=to_undirected,
             task_level=task_level,
-            task_type="regression",  # 显式指定回归任务
+            task_type=task_type,  # 使用定义的task_type变量
         )
     except Exception as e:
         raise ValueError(f"Failed to load dataset {name}: {str(e)}")
@@ -304,6 +332,9 @@ def performat_SramDataset(
     print(f"PID = {os.getpid()}")
     print(f"Building datasets from {name} took {timestr}")
     return None, dataset
+
+
+
 
 
 
