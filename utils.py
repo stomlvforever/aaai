@@ -249,7 +249,7 @@ def plot_distribution_before_normalization(data, dataset_name, save_dir="distrib
         max_val = torch.max(data_tensor).item()
         mean_val = torch.mean(data_tensor.float()).item()
         std_val = torch.std(data_tensor.float()).item()
-        median_val = torch.median(data_tensor.flatten().float()).values.item()
+        median_val = torch.quantile(data_tensor.flatten().float(), 0.5).item()
         
         # 只在绘图时转换到CPU
         data_np = data_tensor.cpu().numpy()
@@ -288,3 +288,26 @@ def plot_distribution_before_normalization(data, dataset_name, save_dir="distrib
     print(f"中位数: {median_val:.6f}")
     print(f"图像已保存至: {save_path}")
     print(f"==============================\n")
+    
+def convert_position_to_classification_labels(y_continuous, num_classes=10):
+    """
+    将position任务的连续值转换为分类标签
+    
+    Args:
+        y_continuous: 连续值标签，范围[0, 1]
+        num_classes: 分类数量，默认10类
+    
+    Returns:
+        分类标签，范围[0, num_classes-1]
+    """
+    # 确保值在[0, 1]范围内
+    y_continuous = torch.clamp(y_continuous, 0.0, 1.0)
+    
+    # 将[0, 1]范围分成num_classes个区间
+    # 0-0.1 -> 0, 0.1-0.2 -> 1, ..., 0.9-1.0 -> 9
+    class_labels = (y_continuous * num_classes).floor().long()
+    
+    # 处理边界情况：值为1.0时应该属于最后一类
+    class_labels = torch.clamp(class_labels, 0, num_classes - 1)
+    
+    return class_labels
