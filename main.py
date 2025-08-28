@@ -28,8 +28,8 @@ if __name__ == "__main__":
     #--small_dataset_sample_rates代表小数据集的采样率，--large_dataset_sample_rates代表大数据集的目标边数，一般默认，看训练效果吧。
     # parser.add_argument("--small_dataset_sample_rates", type=float, default=1.0, help="The sample rate for small dataset.")
     parser.add_argument("--sample_ratio", type=float, default=1, help='子图采样')
-    parser.add_argument("--num_hops", type=int, default=3, help="Number of hops in subgraph sampling.")
-    parser.add_argument('--num_neighbors',type=int,default=32,help='The number of neighbors in subgraph sampling.')
+    parser.add_argument("--num_hops", type=int, default=4, help="Number of hops in subgraph sampling.")
+    parser.add_argument('--num_neighbors',type=int,default=64,help='The number of neighbors in subgraph sampling.')
     
     # Training setting
     #这部分是总体训练的超参数控制，为什么说总体，因为后面还有GNN+的超参数，以及downstream的超参数，分别对应上下游各自的参数，这里是总体的。
@@ -40,8 +40,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=8, help="The number of workers in data loaders.")
     parser.add_argument("--gpu", type=int, default=1, help="GPU index. Default: -1, using cpu.")
     parser.add_argument("--epochs", type=int, default=200, help="Training epochs.")
-    parser.add_argument("--batch_size", type=int, default=128, help="The batch size.")
-    parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
+    parser.add_argument("--batch_size", type=int, default=256, help="The batch size.")
+    parser.add_argument("--lr", type=float, default=0.0008, help="Learning rate.")
 
     # 删除以下SGRL参数定义：
     # parser.add_argument('--sgrl', type=int, default=0, help='Enable contrastive learning, i.e., SGRL.')
@@ -87,9 +87,9 @@ if __name__ == "__main__":
     #上面默认的参数都是baseline或其他实验跑出来的较优值，实际上有时间应该调整的。
     #--use_bn是是否使用bn，建议0，但是用不用似乎影响不大，--act_fn选择'relu'。--use_stats保持默认。
     parser.add_argument("--model", type=str, default='gps_attention', choices=['clustergcn', 'resgatedgcn', 'gat', 'gcn', 'sage', 'gine', 'gps_attention'], help="The gnn model. Could be 'clustergcn', 'resgatedgcn', 'gat', 'gcn', 'sage', 'gine', 'gps_attention'.")
-    parser.add_argument("--num_gnn_layers", type=int, default=4, help="Number of GNN layers.")
+    parser.add_argument("--num_gnn_layers", type=int, default=5, help="Number of GNN layers.")
     parser.add_argument("--num_head_layers", type=int, default=2, help="Number of head layers.")
-    parser.add_argument("--hid_dim", type=int, default=32, help="Hidden layer dim.")
+    parser.add_argument("--hid_dim", type=int, default=128, help="Hidden layer dim.")
     parser.add_argument('--dropout', type=float, default=0.3, help='Dropout for neural networks.')
     parser.add_argument('--use_bn', type=int, default=0, help='0 or 1. Batch norm for neural networks.')
     parser.add_argument('--act_fn', default='leakyrelu', choices=['relu', 'elu', 'tanh', 'leakyrelu', 'prelu'], help='Activation function')
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     
     # Classification setting
     parser.add_argument('--class_loss',type=str,default='cross_entropy',choices=['bsmCE','focal','cross_entropy'],help='The loss function for classification.')
-    parser.add_argument('--num_classes',type=int,default=5,help='The number of classes for node classification.')
+    parser.add_argument('--num_classes',type=int,default=64,help='The number of classes for node classification.')
     parser.add_argument('--class_boundaries',type=list,default=[0.2,0.4,0.6,0.8],help='The boundaries for classification.')
 
     # Balanced MSE setting for GAI implementation
