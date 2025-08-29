@@ -78,13 +78,17 @@ class SealSramDataset(InMemoryDataset):
         self.task_type = task_type
         
         # 分类任务数据集
-        self.classification_datasets = ['integrated_position_prediction_graph'
+        self.classification_datasets = [
+            'integrated_position_prediction_graph',            
+            'integrated_power_density_prediction_graph',
+            'integrated_route_with_global_features',
+            'integrated_floorplan_area_prediction_graph'
             # 示例：'capacitance_classification_graph' （如果有分类任务）
         ]
         
         # 回归任务数据集（全部归到此处）
         self.regression_datasets = [
-            # 'integrated_position_prediction_graph',            
+            'integrated_position_prediction_graph',            
             'integrated_power_density_prediction_graph',
             'integrated_route_with_global_features',
             'integrated_floorplan_area_prediction_graph'
@@ -196,7 +200,8 @@ class SealSramDataset(InMemoryDataset):
                     g.edge_attr[:,2] = 0  # 第3列（索引2）
                 elif self.args.dataset == 'integrated_position_prediction_graph':
                     # 原始归一化
-                    g.y = g.y/255
+                    
+                    g.y = g.y/g.y.max()
                     
                     # 如果是分类任务，转换为分类标签
                     num_classes = getattr(self.args, 'num_classes', 64)
