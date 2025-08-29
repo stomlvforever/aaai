@@ -122,7 +122,8 @@ class GatePowerDensityEvaluator:
             # 2. RMSE (Root Mean Square Error)
             mse = torch.mean((pred_power - true_power) ** 2)
             rmse = torch.sqrt(mse).item()
-            
+            # print(f"true_power:{true_power},pred_power:{pred_power}")
+            # assert 0
             # 3. R² (Coefficient of Determination)
             ss_res = torch.sum((true_power - pred_power) ** 2)
             ss_tot = torch.sum((true_power - torch.mean(true_power)) ** 2)
