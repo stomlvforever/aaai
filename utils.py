@@ -4,45 +4,62 @@ import os
 import numpy as np
 from sklearn.metrics import r2_score
 
-def sample_nodes_by_ratio(graph, ratio=0.2, seed=42):
+def get_nodes_from_subgraphs(full_graph, subgraph_indices, sample_ratio=1.0):
     """
-    按照比例从每个子图中采样节点
+    从指定的子图中获取节点索引，可选择性地进行采样
+    
     Args:
-        graph (torch_geometric.data.Data): 包含节点和子图ID的图数据
-        ratio (float): 采样比例，默认为 0.2（表示采样 20% 的节点）
-        seed (int): 随机种子，用于控制采样的可重复性
+        full_graph: 完整的图数据
+        subgraph_indices: 子图索引列表
+        sample_ratio: 采样比例，1.0表示使用所有节点
+    
     Returns:
-        sampled_node_indices (torch.Tensor): 被采样的节点索引
+        采样后的节点索引
     """
-    torch.manual_seed(seed)  # 设置随机种子，确保可重复性
-
-    # 存储采样的节点索引
-    sampled_node_indices = []
-
-    # 遍历每个子图的节点
-    unique_graph_ids = torch.unique(graph.graph_id)  # 获取所有子图的 ID
-    for graph_id in unique_graph_ids:
-        # 获取当前子图的所有节点索引
-        current_graph_nodes = torch.nonzero(graph.graph_id == graph_id).squeeze()
-
-        # 根据比例计算采样数量
-        num_samples = int(len(current_graph_nodes) * ratio)
-
-        # 进行随机采样
-        sampled_nodes = torch.randperm(len(current_graph_nodes))[:num_samples]
-        sampled_node_indices.append(current_graph_nodes[sampled_nodes])
-
-    # 将所有采样的节点索引拼接在一起
-    return torch.cat(sampled_node_indices)
+    all_nodes = []
+    
+    for subgraph_idx in subgraph_indices:
+        # 获取属于当前子图的所有节点
+        subgraph_mask = (full_graph.graph_id == subgraph_idx)
+        subgraph_nodes = torch.nonzero(subgraph_mask).squeeze()
+        
+        if sample_ratio < 1.0:
+            # 对当前子图的节点进行采样
+            num_nodes = len(subgraph_nodes)
+            num_sample = max(1, int(num_nodes * sample_ratio))
+            
+            # 随机采样节点
+            perm = torch.randperm(num_nodes)
+            sampled_indices = perm[:num_sample]
+            sampled_nodes = subgraph_nodes[sampled_indices]
+            all_nodes.append(sampled_nodes)
+        else:
+            # 使用所有节点
+            all_nodes.append(subgraph_nodes)
+    
+    # 合并所有采样的节点
+    if all_nodes:
+        return torch.cat(all_nodes)
+    else:
+        return torch.tensor([], dtype=torch.long)
 
 
 def plot_true_values_distribution_before_sampling(dataset, dataset_name=None, save_dir="distribution_plots"):
     """
-    在采样之前绘制真实值的分布直方图
+    在采样之前绘制真实值的分布直方图，包括频率分布、密度分布、累积分布和箱线图
+    
     Args:
-        dataset: 数据集对象
-        dataset_name: 数据集名称（如 integrated_power_density_prediction_graph）
-        save_dir: 保存图片的目录
+        dataset: 数据集对象，必须支持索引访问dataset[0]，且包含y属性
+        dataset_name (str, optional): 数据集名称（如 integrated_power_density_prediction_graph），用于图表标题和文件命名
+        save_dir (str): 保存图片的目录，默认为"distribution_plots"
+    
+    Returns:
+        str: 保存的图片文件路径
+    
+    Side Effects:
+        - 创建保存目录（如果不存在）
+        - 保存包含4个子图的分布图像文件
+        - 打印详细的统计信息到控制台
     """
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
@@ -117,14 +134,23 @@ def plot_true_values_distribution_before_sampling(dataset, dataset_name=None, sa
 
 def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_dir=None, device=None):
     """
-    绘制真实值vs预测值的散点图
+    绘制真实值vs预测值的散点图，包括R²和MAE指标，支持GPU加速计算
+    
     Args:
-        pred_values: 预测值数组
-        true_values: 真实值数组  
-        epoch: 当前epoch数
-        split_name: 数据集名称 (train/val/test)
-        save_dir: 保存目录，如果为None则自动生成基于PID的目录
-        device: 计算设备，如果为None则自动检测
+        pred_values (torch.Tensor or array-like): 预测值数组，可以是torch.Tensor或numpy数组
+        true_values (torch.Tensor or array-like): 真实值数组，可以是torch.Tensor或numpy数组
+        epoch (int): 当前epoch数，用于文件命名和图表标题
+        split_name (str): 数据集名称 (train/val/test)，用于文件命名和图表标题
+        save_dir (str, optional): 保存目录，如果为None则自动生成基于PID的目录
+        device (torch.device, optional): 计算设备，如果为None则自动检测
+    
+    Returns:
+        None
+    
+    Side Effects:
+        - 创建保存目录（如果不存在）
+        - 保存散点图文件
+        - 打印保存路径信息到控制台
     """
     # 动态生成保存目录（基于进程ID）
     if save_dir is None:
@@ -236,7 +262,22 @@ def plot_pred_vs_true_scatter(pred_values, true_values, epoch, split_name, save_
 
 def plot_distribution_before_normalization(data, dataset_name, save_dir="distribution_plots", device=None):
     """
-    绘制归一化前的数据分布图（支持GPU计算）
+    绘制归一化前的数据分布图，支持GPU计算统计量
+    
+    Args:
+        data (torch.Tensor or array-like): 需要绘制分布的数据，可以是torch.Tensor或numpy数组
+        dataset_name (str): 数据集名称，用于图表标题和文件命名
+        save_dir (str): 保存目录，默认为"distribution_plots"
+        device (torch.device, optional): 计算设备，如果为None则自动检测
+    
+    Returns:
+        None
+    
+    Side Effects:
+        - 创建保存目录（如果不存在）
+        - 保存分布图文件
+        - 显示图表
+        - 打印详细的统计信息到控制台
     """
     # 自动检测设备
     if device is None and torch.is_tensor(data):
@@ -291,14 +332,19 @@ def plot_distribution_before_normalization(data, dataset_name, save_dir="distrib
     
 def convert_position_to_classification_labels(y_continuous, num_classes=10):
     """
-    将position任务的连续值转换为分类标签
+    将position任务的连续值转换为分类标签，将[0,1]范围等分为指定数量的类别
     
     Args:
-        y_continuous: 连续值标签，范围[0, 1]
-        num_classes: 分类数量
+        y_continuous (torch.Tensor): 连续值标签，范围应在[0, 1]之间，形状为[N] 或 [N, 1]
+        num_classes (int): 分类数量，默认为10，表示将[0,1]范围分成10个等间隔的类别
     
     Returns:
-        分类标签，范围[0, num_classes-1]
+        torch.Tensor: 分类标签，范围[0, num_classes-1]，数据类型为long，形状与输入相同
+    
+    Example:
+        >>> y_continuous = torch.tensor([0.05, 0.15, 0.95, 1.0])
+        >>> labels = convert_position_to_classification_labels(y_continuous, num_classes=10)
+        >>> print(labels)  # tensor([0, 1, 9, 9])
     """
     # 确保值在[0, 1]范围内
     y_continuous = torch.clamp(y_continuous, 0.0, 1.0)
@@ -311,3 +357,5 @@ def convert_position_to_classification_labels(y_continuous, num_classes=10):
     class_labels = torch.clamp(class_labels, 0, num_classes - 1)
     
     return class_labels
+
+
