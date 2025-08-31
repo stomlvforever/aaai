@@ -295,7 +295,7 @@ def convert_position_to_classification_labels(y_continuous, num_classes=10):
     
     Args:
         y_continuous: 连续值标签，范围[0, 1]
-        num_classes: 分类数量，默认10类
+        num_classes: 分类数量
     
     Returns:
         分类标签，范围[0, num_classes-1]
