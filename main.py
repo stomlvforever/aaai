@@ -28,8 +28,8 @@ if __name__ == "__main__":
     #--small_dataset_sample_rates代表小数据集的采样率，--large_dataset_sample_rates代表大数据集的目标边数，一般默认，看训练效果吧。
     # parser.add_argument("--small_dataset_sample_rates", type=float, default=1.0, help="The sample rate for small dataset.")
     parser.add_argument("--sample_ratio", type=float, default=1, help='子图采样')
-    parser.add_argument("--num_hops", type=int, default=4, help="Number of hops in subgraph sampling.")
-    parser.add_argument('--num_neighbors',type=int,default=64,help='The number of neighbors in subgraph sampling.')
+    parser.add_argument("--num_hops", type=int, default=2, help="Number of hops in subgraph sampling.")
+    parser.add_argument('--num_neighbors',type=int,default=32,help='The number of neighbors in subgraph sampling.')
     
     # Training setting
     #这部分是总体训练的超参数控制，为什么说总体，因为后面还有GNN+的超参数，以及downstream的超参数，分别对应上下游各自的参数，这里是总体的。
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=8, help="The number of workers in data loaders.")
     parser.add_argument("--gpu", type=int, default=1, help="GPU index. Default: -1, using cpu.")
     parser.add_argument("--epochs", type=int, default=200, help="Training epochs.")
-    parser.add_argument("--batch_size", type=int, default=256, help="The batch size.")
+    parser.add_argument("--batch_size", type=int, default=128, help="The batch size.")
     parser.add_argument("--lr", type=float, default=0.0008, help="Learning rate.")
 
     # 删除以下SGRL参数定义：
@@ -173,7 +173,7 @@ if __name__ == "__main__":
             name='integrated_position_prediction_graph',
             dataset_dir='/home/zoujj/project/aaai/datasets/',
             args = args,
-            neg_edge_ratio=args.neg_edge_ratio,
+
             to_undirected=True,
             task_level=args.task_level
         )
@@ -183,7 +183,7 @@ if __name__ == "__main__":
             name='integrated_power_density_prediction_graph',
             dataset_dir='/home/zoujj/project/aaai/datasets/',
             args = args,
-            neg_edge_ratio=args.neg_edge_ratio,
+
             to_undirected=True,
             task_level=args.task_level
         )
@@ -193,7 +193,7 @@ if __name__ == "__main__":
             name='integrated_route_with_global_features',
             dataset_dir='/home/zoujj/project/aaai/datasets/',
             args = args,
-            neg_edge_ratio=args.neg_edge_ratio,
+
             to_undirected=True,
             task_level=args.task_level
         )       
@@ -203,7 +203,7 @@ if __name__ == "__main__":
                 name='integrated_floorplan_area_prediction_graph',
                 dataset_dir='/home/zoujj/project/aaai/datasets/',
                 args = args,
-                neg_edge_ratio=args.neg_edge_ratio,
+
                 to_undirected=True,
                 task_level=args.task_level
             )           
