@@ -66,7 +66,6 @@ class SealSramDataset(InMemoryDataset):
         name,
         root,
         args=None,  # 添加args参数
-        neg_edge_ratio=1.0,
         to_undirected=True,
         task_level='node',
         task_type='classification',  # 'classification' 或 'regression'
@@ -119,7 +118,6 @@ class SealSramDataset(InMemoryDataset):
             print(f"SealSramDataset ({task_type}) includes {self.names} circuits")
         
         self.folder = os.path.join(root, self.name)
-        self.neg_edge_ratio = neg_edge_ratio
         self.to_undirected = to_undirected
         self.data_lengths = {}
         self.data_offsets = {}
@@ -201,11 +199,11 @@ class SealSramDataset(InMemoryDataset):
                 elif self.args.dataset == 'integrated_position_prediction_graph':
                     # 原始归一化
                     
-                    g.y = g.y/g.y.max()
+                    # g.y = g.y/g.y.max()
                     
                     # 如果是分类任务，转换为分类标签
-                    num_classes = getattr(self.args, 'num_classes', 64)
-                    g.y = convert_position_to_classification_labels(g.y, num_classes)
+                    # num_classes = getattr(self.args, 'num_classes', 64)
+                    # g.y = convert_position_to_classification_labels(g.y, num_classes)
                     
                     g.x[:,4] = g.x[:,4] / g.x[:,4].max()
                     g.x[:,6] = g.x[:,6] / g.x[:,6].max()
@@ -293,22 +291,23 @@ class SealSramDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        if self.empty_dataset:
-            return []
-            
-        processed_names = []
-        for i, name in enumerate(self.names):
-            if self.neg_edge_ratio < 1.0:
-                name += f"_nr{self.neg_edge_ratio:.1f}"
-            processed_names.append(name+"_processed.pt")
-        return processed_names
+        if self.args and hasattr(self.args, 'sample_ratio'):
+            sample_ratio = self.args.sample_ratio
+        else:
+            sample_ratio = 1.0
+        
+        return [f"{name}_sample_{sample_ratio}_{self.task_level}_{self.task_type}.pt" for name in self.names]
+    
+    @property
+    def processed_paths(self):
+        """返回处理后文件的完整路径列表"""
+        return [os.path.join(self.processed_dir, f) for f in self.processed_file_names]
 
 
 def performat_SramDataset(
     dataset_dir,
     name,
     args=None,  # 允许 args 为 None
-    neg_edge_ratio=1.0,
     to_undirected=True,
     task_level="node",
 ):
@@ -324,7 +323,6 @@ def performat_SramDataset(
             name=name,
             root=dataset_dir,
             args=args,  # 传递args
-            neg_edge_ratio=neg_edge_ratio,
             to_undirected=to_undirected,
             task_level=task_level,
             task_type=task_type,  # 使用定义的task_type变量
